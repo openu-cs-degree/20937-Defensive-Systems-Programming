@@ -101,11 +101,7 @@ namespace maman14
     static std::optional<Response> process_request(Request &request)
     {
       std::cout << "process_request\n";
-      Response response;
-      response.version = Server::VERSION;
-      response.name_len = request.name_len;
-      response.filename = std::move(request.filename);
-      response.payload = std::move(request.payload);
+      Response response{Server::VERSION, Status::ERROR_GENERAL, request.name_len, std::move(request.filename), std::move(request.payload)};
 
       switch (request.op)
       {
