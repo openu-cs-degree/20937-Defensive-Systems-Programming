@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <memory>
 #undef DELETE // the DELETE macro collides with Op::DELETE definition
 
 namespace maman14
@@ -25,7 +26,7 @@ namespace maman14
   struct Payload
   {
     uint32_t size;
-    uint8_t *payload;
+    std::unique_ptr<uint8_t[]> payload;
   };
 
   struct Request
@@ -34,7 +35,7 @@ namespace maman14
     uint8_t version;
     Op op;
     uint16_t name_len;
-    char *filename;
+    std::unique_ptr<char[]> filename;
     Payload payload;
   };
 
@@ -43,7 +44,7 @@ namespace maman14
     uint8_t version;
     Status status;
     uint16_t name_len;
-    char *filename;
+    std::unique_ptr<char[]> filename;
     Payload payload;
   };
 }
