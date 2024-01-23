@@ -20,6 +20,10 @@ namespace maman14
         : acceptor(io_context, tcp::endpoint(tcp::v4(), port))
     {
     }
+    Server(const Server &) = delete;
+    Server &operator=(const Server &) = delete;
+    Server(Server &&) = delete;
+    Server &operator=(Server &&) = delete;
 
     void start()
     {
