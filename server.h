@@ -43,7 +43,7 @@ namespace
   PACK(
       struct Payload {
         uint32_t size;
-        std::unique_ptr<uint8_t[]> payload;
+        std::unique_ptr<uint8_t[]> content;
       };
 
       struct Request {
@@ -116,8 +116,8 @@ namespace
     }
 
     // Read the payload
-    request.payload.payload = std::make_unique<uint8_t[]>(request.payload.size);
-    boost::asio::read(socket, boost::asio::buffer(request.payload.payload.get(), request.payload.size), error);
+    request.payload.content = std::make_unique<uint8_t[]>(request.payload.size);
+    boost::asio::read(socket, boost::asio::buffer(request.payload.content.get(), request.payload.size), error);
 
     if (error)
     {
@@ -160,7 +160,7 @@ namespace
         break;
       }
 
-      file.write(reinterpret_cast<const char *>(response.payload.payload.get()), response.payload.size);
+      file.write(reinterpret_cast<const char *>(response.payload.content.get()), response.payload.size);
       if (!file)
       {
         std::cerr << "Failed to write to file: " << file_path << '\n';
@@ -186,8 +186,8 @@ namespace
       file.seekg(0, std::ios::beg);
 
       // Allocate memory for the payload and read the file into it
-      response.payload.payload = std::make_unique<uint8_t[]>(static_cast<size_t>(size));
-      if (!file.read(reinterpret_cast<char *>(response.payload.payload.get()), size))
+      response.payload.content = std::make_unique<uint8_t[]>(static_cast<size_t>(size));
+      if (!file.read(reinterpret_cast<char *>(response.payload.content.get()), size))
       {
         std::cerr << "Failed to read file: " << file_path << '\n';
         response.status = Status::ERROR_GENERAL;
@@ -198,7 +198,7 @@ namespace
 
       // std::cout << "Read " << size << " bytes from file: " << file_path << '\n';
       // std::cout << "Payload size: " << std::hex << response.payload.size << '\n';
-      // std::cout << "Payload: " << response.payload.payload.get() << std::dec << '\n';
+      // std::cout << "Payload: " << response.payload.content.get() << std::dec << '\n';
 
       response.status = Status::SUCCESS_RESTORE;
       break;
@@ -289,7 +289,7 @@ namespace
     }
 
     // Write the payload
-    boost::asio::write(socket, boost::asio::buffer(response.payload.payload.get(), response.payload.size), error);
+    boost::asio::write(socket, boost::asio::buffer(response.payload.content.get(), response.payload.size), error);
 
     if (error)
     {
@@ -316,7 +316,7 @@ namespace
     // std::cout << "name_len: " << request->name_len << '\n';
     // std::cout << "filename: " << request->filename.get() << '\n';
     // std::cout << "payload size: " << request->payload.size << '\n';
-    // std::cout << "payload: " << request->payload.payload.get() << '\n';
+    // std::cout << "payload: " << request->payload.content.get() << '\n';
 
     auto response = process_request(request.value());
     if (!response)
@@ -333,7 +333,7 @@ namespace
     null_terminated_filename += '\0';
     std::cout << "filename: " << null_terminated_filename << '\n';
     std::cout << "payload size: " << response->payload.size << '\n';
-    std::cout << "payload: " << response->payload.payload.get() << '\n';
+    std::cout << "payload: " << response->payload.content.get() << '\n';
 
     write_response(socket, response.value());
   }
