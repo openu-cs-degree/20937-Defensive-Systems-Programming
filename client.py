@@ -173,18 +173,15 @@ class Client:
         filename = data[filename_start:filename_end].decode('ascii')
 
         # Unpack the payload size from the data
-        if len(data) < filename_end + 4:
-            payload_obj = None
-        else:
-            payload_size = struct.unpack('<I', data[filename_end:filename_end+4])[0]
+        payload_size = struct.unpack('<I', data[filename_end:filename_end+4])[0]
 
-            # Unpack the payload from the data
-            payload_start = filename_end + 4
-            payload_end = payload_start + payload_size
-            payload = data[payload_start:payload_end]
+        # Unpack the payload from the data
+        payload_start = filename_end + 4
+        payload_end = payload_start + payload_size
+        payload = data[payload_start:payload_end]
 
-            # Create a Payload object
-            payload_obj = Payload(payload_size, payload)
+        # Create a Payload object
+        payload_obj = Payload(payload_size, payload)
 
         # Create a Response object
         response = Response(version, Status(status), name_len, filename, payload_obj)
@@ -206,6 +203,24 @@ def generate_save_request(user_id: int, filename: str, payload: bytes) -> Reques
 
     return request
 
+def generate_restore_request(user_id: int, filename: str) -> Request:
+    empty_payload = Payload(0, b'')
+    request = Request(user_id, VERSION, Op.RESTORE, len(filename), filename, empty_payload)
+
+    return request
+
+def generate_delete_request(user_id: int, filename: str) -> Request:
+    empty_payload = Payload(0, b'')
+    request = Request(user_id, VERSION, Op.DELETE, len(filename), filename, empty_payload)
+
+    return request
+
+def generate_list_request(user_id: int) -> Request:
+    empty_payload = Payload(0, b'')
+    request = Request(user_id, VERSION, Op.LIST, 0, '', empty_payload)
+
+    return request
+
 def main():
     uniqueIDGenerator = UniqueIDGenerator() 
     unique_id = uniqueIDGenerator.generate_unique_id()
@@ -217,7 +232,10 @@ def main():
 
     client = Client(ip_address, port)
     save_request = generate_save_request(unique_id, "abcdefghi", b'a')
-    client.send_request(save_request)
+    restore_request = generate_restore_request(unique_id, "abcdefghi")
+    delete_request = generate_delete_request(unique_id, "abcdefghi")
+    list_request = generate_list_request(unique_id)
+    client.send_request(list_request)
 
 if __name__ == "__main__":
     main()
