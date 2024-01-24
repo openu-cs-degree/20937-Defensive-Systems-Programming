@@ -12,8 +12,7 @@
 
 int main()
 {
-  maman14::Server server(60000);
-  server.start();
+  maman14::Server::start(60000);
 
   std::vector<std::string> msg{"Hello", "C++", "World", "from", "VS Code", "and the C++ extension!"};
 

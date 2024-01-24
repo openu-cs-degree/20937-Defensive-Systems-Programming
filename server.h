@@ -20,25 +20,22 @@ namespace maman14
     static constexpr inline std::string_view SERVER_DIR_NAME = "my_server";
 
   public:
-    Server(uint16_t port)
-        : acceptor(io_context, tcp::endpoint(tcp::v4(), port))
-    {
-    }
+    Server() = delete;
     Server(const Server &) = delete;
     Server &operator=(const Server &) = delete;
     Server(Server &&) = delete;
     Server &operator=(Server &&) = delete;
 
-    void start()
+    static void start(uint16_t port)
     {
       try
       {
         while (true)
         {
-          std::cout << "Waiting for connection\n";
+          boost::asio::io_context io_context;
           tcp::socket socket(io_context);
+          tcp::acceptor acceptor(io_context, tcp::endpoint(tcp::v4(), port));
           acceptor.accept(socket);
-          std::cout << "Accepted for connection\n";
 
           std::thread(Server::handle_client, std::move(socket)).detach();
         }
@@ -50,9 +47,6 @@ namespace maman14
     }
 
   private:
-    boost::asio::io_context io_context;
-    tcp::acceptor acceptor;
-
     static std::optional<Request> read_request(tcp::socket &socket)
     {
       std::cout << "read_request\n"
