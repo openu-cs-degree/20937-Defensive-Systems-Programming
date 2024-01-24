@@ -114,19 +114,19 @@ namespace maman14
       Response response{Server::VERSION, Status::ERROR_GENERAL, request.name_len, std::move(request.filename), std::move(request.payload)};
       // no borrow-checking, beware of using request.filename and request.payload after this point!
 
+      // Construct the directory path
+      std::filesystem::path dir_path = std::filesystem::path("C:\\") / SERVER_DIR_NAME / std::to_string(request.user_id);
+
+      // Create the directory if it doesn't exist
+      std::filesystem::create_directories(dir_path);
+
+      // Construct the file path
+      std::filesystem::path file_path = dir_path / response.filename.get();
+
       switch (request.op)
       {
       case Op::SAVE:
       {
-        // Construct the directory path
-        std::filesystem::path dir_path = std::filesystem::path("C:\\") / SERVER_DIR_NAME / std::to_string(request.user_id);
-
-        // Create the directory if it doesn't exist
-        std::filesystem::create_directories(dir_path);
-
-        // Construct the file path
-        std::filesystem::path file_path = dir_path / response.filename.get();
-
         // Open the file and write the payload to it
         std::ofstream file(file_path, std::ios::binary);
         if (!file)
@@ -151,8 +151,17 @@ namespace maman14
         response.status = Status::SUCCESS_RESTORE;
         break;
       case Op::DELETE:
-        response.status = Status::SUCCESS_RESTORE;
+      {
+        if (std::error_code ec; !std::filesystem::remove(file_path, ec))
+        {
+          std::cerr << "Failed to delete file: " << file_path << '\n';
+          response.status = Status::ERROR_GENERAL;
+          break;
+        }
+
+        response.status = Status::SUCCESS_SAVE;
         break;
+      }
       case Op::LIST:
         response.status = Status::SUCCESS_LIST;
         break;
