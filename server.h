@@ -1,5 +1,4 @@
 #include <iostream>
-#include <boost/asio.hpp>
 #include <thread>
 #include <optional>
 #include <filesystem>
@@ -8,6 +7,11 @@
 #include <cstdint>
 #include <memory>
 #include <algorithm>
+
+#pragma warning(push)
+#pragma warning(disable : 6001 6031 6101 6255 6258 6313 6387)
+#include <boost/asio.hpp>
+#pragma warning(pop)
 
 #undef DELETE // the DELETE macro collides with Op::DELETE definition
 
