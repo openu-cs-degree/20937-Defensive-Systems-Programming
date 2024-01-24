@@ -4,6 +4,7 @@
 #include <optional>
 #include <filesystem>
 #include <fstream>
+#include <string_view>
 
 #include "common.h"
 
@@ -163,8 +164,37 @@ namespace maman14
         break;
       }
       case Op::LIST:
+      {
+        // Generate a random string of 32 characters
+        static constexpr std::string_view characters = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+        static constexpr size_t file_name_length = 32;
+        std::string random_string;
+        for (size_t i = 0; i < file_name_length; ++i)
+        {
+          random_string += characters[rand() % characters.size()];
+        }
+        file_path = dir_path / random_string;
+
+        std::ofstream file(file_path);
+        if (!file)
+        {
+          std::cerr << "Failed to create file: " << file_path << '\n';
+          response.status = Status::ERROR_GENERAL;
+          break;
+        }
+
+        // Iterate over the files in the directory and write their names to the new file
+        for (const auto &entry : std::filesystem::directory_iterator(dir_path))
+        {
+          if (auto filename = entry.path().filename(); filename != random_string)
+          {
+            file << filename << '\n';
+          }
+        }
+
         response.status = Status::SUCCESS_LIST;
         break;
+      }
       default:
         response.status = Status::ERROR_GENERAL;
         break;
