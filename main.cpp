@@ -12,12 +12,5 @@
 
 int main()
 {
-  maman14::Server::start(60000);
-
-  std::vector<std::string> msg{"Hello", "C++", "World", "from", "VS Code", "and the C++ extension!"};
-
-  std::for_each(msg.begin(), msg.end(), [](std::string &word)
-                { std::cout << word << " "; });
-
-  std::cout << "\n\n";
+  maman14::start_server_on_port(60000);
 }
