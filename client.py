@@ -30,7 +30,6 @@ def validate_range(var_name: str, number: int, uint_type: Literal["uint8_t", "ui
     }
 
     min_val, max_val = ranges[uint_type]
-
     if not (min_val <= number <= max_val):
         raise ValueError(f"{var_name} {number} is out of range for {uint_type}.")
     
@@ -45,7 +44,7 @@ class Request:
     def __init__(self, user_id: int, version: int, op: Op, name_len: int, filename: str, payload: Payload):
         validate_range("user_id", user_id, "uint32_t")
         validate_range("version", version, "uint8_t")
-        validate_range("op.value", op.value, "uint8_t")
+        validate_range("op", op.value, "uint8_t")
         validate_range("name_len", name_len, "uint16_t")
         
         self.user_id = user_id
@@ -57,6 +56,10 @@ class Request:
 
 class Response:
     def __init__(self, version: int, status: Status, name_len: int, filename: str, payload: Payload):
+        validate_range("version", version, "uint8_t")
+        validate_range("status", status.value, "uint16_t")
+        validate_range("name_len", name_len, "uint16_t")
+
         self.version = version
         self.status = status
         self.name_len = name_len
