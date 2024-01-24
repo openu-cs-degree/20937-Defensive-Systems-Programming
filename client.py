@@ -1,5 +1,6 @@
-import uuid
+import random
 from typing import Tuple, List
+import binascii # TODO: remove
 import socket
 from enum import Enum
 import struct
@@ -22,14 +23,26 @@ class Status(Enum):
 
 class Payload:
     def __init__(self, size: int, payload: bytes):
+        if not (0 <= size <= 0xFFFFFFFF):
+            raise ValueError("payload.size is out of range for uint32_t.")
+        
         self.size = size
         self.payload = payload
 
 class Request:
     def __init__(self, user_id: int, version: int, op: Op, name_len: int, filename: str, payload: Payload):
+        if not (0 <= user_id <= 0xFFFFFFFF):
+            raise ValueError(f"user_id {user_id} is out of range for uint32_t.")
+        if not (0 <= version <= 0xFF):
+            raise ValueError(f"version {version} is out of range for uint8_t.")
+        if not (0 <= op.value <= 0xFF):
+            raise ValueError(f"op.value {op.value} is out of range for uint8_t.")
+        if not (0 <= name_len <= 0xFFFF):
+            raise ValueError(f"name_len {name_len} is out of range for uint16_t.")
+        
         self.user_id = user_id
         self.version = version
-        self.op = op
+        self.op = op.value
         self.name_len = name_len
         self.filename = filename
         self.payload = payload
@@ -86,6 +99,17 @@ class FileHandler:
             raise Exception(f"An error occurred: {str(e)}")
         return filenames
 
+class UniqueIDGenerator:
+    def __init__(self):
+        self.generated_ids = set()
+
+    def generate_unique_id(self) -> int:
+        while True:
+            unique_id = random.randint(0, 0xFFFFFFFF)
+            if unique_id not in self.generated_ids:
+                self.generated_ids.add(unique_id)
+                return unique_id
+
 class Client:
     def __init__(self, ip_address: str, port: int):
         self.ip_address = ip_address
@@ -110,24 +134,29 @@ class Client:
             raise ValueError("Filename length is out of range.")
         if not (0 <= len(request.payload.payload) <= 0xFFFFFFFF):
             raise ValueError("Payload size is out of range.")
-
+        
+        print(request.__dict__)
+        print(request.payload.__dict__)
+        
         # Pack the request data into a bytes object
         request_data = struct.pack(
-            f'!I B B H {len(filename_bytes)}s I {len(request.payload.payload)}p',
+            f'<I B B H {len(filename_bytes)}s I {len(request.payload.payload)}s',
             request.user_id,
             request.version,
-            request.op.value,
+            request.op,
             len(filename_bytes),
             filename_bytes,
             len(request.payload.payload),
             request.payload.payload
         )
 
+        print(binascii.hexlify(request_data))
+
         return request_data
 
     def unpack_response(self, data: bytes) -> Response:
         # Unpack the version and status from the first part of the response
-        version, status, name_len = struct.unpack('!B H H', data[:5])
+        version, status, name_len = struct.unpack('<B H H', data[:5])
 
         # Calculate the start and end indices of the filename in the data
         filename_start = 5
@@ -165,15 +194,17 @@ def generate_save_request(user_id: int, filename: str, payload: bytes) -> Reques
     return request
 
 def main():
-    unique_id = uuid.uuid4()
+    uniqueIDGenerator = UniqueIDGenerator() 
+    unique_id = uniqueIDGenerator.generate_unique_id()
+    unique_id = 53764
 
     reader = FileHandler()
     ip_address, port = reader.read_server_info()
     filenames = reader.read_backup_info()
 
     client = Client(ip_address, port)
-    save_request = generate_save_request(unique_id.int, "new file", b'Hello World!')
-    # client.send_request(save_request)
+    save_request = generate_save_request(unique_id, "abcdefghi", b'a')
+    client.send_request(save_request)
     # TODO: pack_request fails. figure out y.
 
 if __name__ == "__main__":
