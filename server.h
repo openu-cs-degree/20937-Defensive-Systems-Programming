@@ -149,8 +149,37 @@ namespace maman14
         break;
       }
       case Op::RESTORE:
+      {
+        // Open the file and read its contents
+        std::ifstream file(file_path, std::ios::binary | std::ios::ate);
+        if (!file)
+        {
+          std::cerr << "Failed to open file: " << file_path << '\n';
+          response.status = Status::ERROR_GENERAL;
+          break;
+        }
+
+        std::streamsize size = file.tellg();
+        file.seekg(0, std::ios::beg);
+
+        // Allocate memory for the payload and read the file into it
+        response.payload.payload = std::make_unique<uint8_t[]>(static_cast<size_t>(size));
+        if (!file.read(reinterpret_cast<char *>(response.payload.payload.get()), size))
+        {
+          std::cerr << "Failed to read file: " << file_path << '\n';
+          response.status = Status::ERROR_GENERAL;
+          break;
+        }
+
+        response.payload.size = static_cast<size_t>(size);
+
+        // std::cout << "Read " << size << " bytes from file: " << file_path << '\n';
+        // std::cout << "Payload size: " << std::hex << response.payload.size << '\n';
+        // std::cout << "Payload: " << response.payload.payload.get() << std::dec << '\n';
+
         response.status = Status::SUCCESS_RESTORE;
         break;
+      }
       case Op::DELETE:
       {
         if (std::error_code ec; !std::filesystem::remove(file_path, ec))
