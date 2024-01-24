@@ -197,29 +197,33 @@ class Client:
             print(f"Payload size: {response.payload.size}")
             print(f"Payload: {response.payload.payload}")
 
-def generate_save_request(user_id: int, filename: str, payload: bytes) -> Request:
-    payload_obj = Payload(len(payload), payload)
-    request = Request(user_id, VERSION, Op.SAVE, len(filename), filename, payload_obj)
+class RequestGenerator:
+    def __init__(self, user_id):
+        self.user_id = user_id
 
-    return request
+    def generate_save_request(self, filename: str, content: bytes) -> Request:
+        payload_obj = Payload(len(content), content)
+        request = Request(self.user_id, VERSION, Op.SAVE, len(filename), filename, payload_obj)
 
-def generate_restore_request(user_id: int, filename: str) -> Request:
-    empty_payload = Payload(0, b'')
-    request = Request(user_id, VERSION, Op.RESTORE, len(filename), filename, empty_payload)
+        return request
 
-    return request
+    def generate_restore_request(self, filename: str) -> Request:
+        empty_payload = Payload(0, b'')
+        request = Request(self.user_id, VERSION, Op.RESTORE, len(filename), filename, empty_payload)
 
-def generate_delete_request(user_id: int, filename: str) -> Request:
-    empty_payload = Payload(0, b'')
-    request = Request(user_id, VERSION, Op.DELETE, len(filename), filename, empty_payload)
+        return request
 
-    return request
+    def generate_delete_request(self, filename: str) -> Request:
+        empty_payload = Payload(0, b'')
+        request = Request(self.user_id, VERSION, Op.DELETE, len(filename), filename, empty_payload)
 
-def generate_list_request(user_id: int) -> Request:
-    empty_payload = Payload(0, b'')
-    request = Request(user_id, VERSION, Op.LIST, 0, '', empty_payload)
+        return request
 
-    return request
+    def generate_list_request(self) -> Request:
+        empty_payload = Payload(0, b'')
+        request = Request(self.user_id, VERSION, Op.LIST, 0, '', empty_payload)
+
+        return request
 
 def main():
     uniqueIDGenerator = UniqueIDGenerator() 
@@ -231,10 +235,11 @@ def main():
     filenames = reader.read_backup_info()
 
     client = Client(ip_address, port)
-    save_request = generate_save_request(unique_id, "abcdefghi", b'a')
-    restore_request = generate_restore_request(unique_id, "abcdefghi")
-    delete_request = generate_delete_request(unique_id, "abcdefghi")
-    list_request = generate_list_request(unique_id)
+    generator = RequestGenerator(unique_id)
+    save_request = generator.generate_save_request("abcdefghi", b'a')
+    restore_request = generator.generate_restore_request("abcdefghi")
+    delete_request = generator.generate_delete_request("abcdefghi")
+    list_request = generator.generate_list_request()
     client.send_request(list_request)
 
 if __name__ == "__main__":
