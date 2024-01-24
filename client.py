@@ -1,5 +1,5 @@
 import random
-from typing import Tuple, List
+from typing import Tuple, List, Literal
 import binascii # TODO: remove
 import socket
 from enum import Enum
@@ -20,25 +20,33 @@ class Status(Enum):
     ERROR_NO_FILE = 1001
     ERROR_NO_CLIENT = 1002
     ERROR_GENERAL = 1003
+    
+def validate_range(var_name: str, number: int, uint_type: Literal["uint8_t", "uint16_t", "uint32_t", "uint64_t"]) -> None:
+    ranges = {
+        "uint8_t": (0, 0xFF),
+        "uint16_t": (0, 0xFFFF),
+        "uint32_t": (0, 0xFFFFFFFF),
+        "uint64_t": (0, 0xFFFFFFFFFFFFFFFF)
+    }
 
+    min_val, max_val = ranges[uint_type]
+
+    if not (min_val <= number <= max_val):
+        raise ValueError(f"{var_name} {number} is out of range for {uint_type}.")
+    
 class Payload:
     def __init__(self, size: int, payload: bytes):
-        if not (0 <= size <= 0xFFFFFFFF):
-            raise ValueError("payload.size is out of range for uint32_t.")
-        
+        validate_range("payload.size", size, "uint32_t")
+
         self.size = size
         self.payload = payload
 
 class Request:
     def __init__(self, user_id: int, version: int, op: Op, name_len: int, filename: str, payload: Payload):
-        if not (0 <= user_id <= 0xFFFFFFFF):
-            raise ValueError(f"user_id {user_id} is out of range for uint32_t.")
-        if not (0 <= version <= 0xFF):
-            raise ValueError(f"version {version} is out of range for uint8_t.")
-        if not (0 <= op.value <= 0xFF):
-            raise ValueError(f"op.value {op.value} is out of range for uint8_t.")
-        if not (0 <= name_len <= 0xFFFF):
-            raise ValueError(f"name_len {name_len} is out of range for uint16_t.")
+        validate_range("user_id", user_id, "uint32_t")
+        validate_range("version", version, "uint8_t")
+        validate_range("op.value", op.value, "uint8_t")
+        validate_range("name_len", name_len, "uint16_t")
         
         self.user_id = user_id
         self.version = version
@@ -62,29 +70,27 @@ class FileHandler:
         self.server_info_file = self.SERVER_INFO_FILE
         self.backup_info_file = self.BACKUP_INFO_FILE
 
-    def validate_ip(self, ip: str) -> bool:
+    def validate_ip(self, ip: str) -> None:
         try:
             socket.inet_aton(ip)
-            return True
         except socket.error:
-            return False
+            raise ValueError("Invalid IP address.")
 
-    def validate_port(self, port: str) -> bool:
-        return 0 <= int(port) <= 65535
+    def validate_port(self, port: str) -> None:
+        if not 0 <= int(port) <= 65535:
+            raise ValueError("Invalid port number.")
 
     def read_server_info(self) -> Tuple[str, int]:
         try:
             with open(self.server_info_file, 'r') as file:
                 ip_address, port = file.readline().strip().split(':')
-                if not self.validate_ip(ip_address):
-                    raise ValueError("Invalid IP address.")
-                if not self.validate_port(port):
-                    raise ValueError("Invalid port number.")
+                self.validate_ip(ip_address)
+                self.validate_port(port)
                 port = int(port)
         except FileNotFoundError:
             raise Exception(f"{self.server_info_file} file not found.")
-        except ValueError as e:
-            raise Exception(f"An error occurred: {str(e)}")
+        except ValueError as e: 
+            raise Exception(f"An error occurred: {str(e)}") # TODO: this raise is redundant?
         except Exception as e:
             raise Exception(f"An error occurred: {str(e)}")
         return ip_address, port
@@ -116,30 +122,25 @@ class Client:
         self.port = port
 
     def send_request(self, request: Request):
-        socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
-        socket.connect((self.ip_address, self.port))
-        socket.send(self.pack_request(request))
+        my_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
+        my_socket.connect((self.ip_address, self.port))
+        my_socket.send(self.pack_request(request))
 
-        data = socket.recv(1024)
-        data += socket.recv(1024)
-        data += socket.recv(1024)
-        data += socket.recv(1024)
+        data = my_socket.recv(1024)
+        data += my_socket.recv(1024)
+        data += my_socket.recv(1024)
+        data += my_socket.recv(1024)
         response = self.unpack_response(data)
         self.print_response(response) # TODO: send back to the user?
 
-        socket.close()
+        my_socket.close()
 
     def pack_request(self, request: Request) -> bytes:
         # Convert the filename to bytes
         filename_bytes = request.filename.encode('utf-8')
 
-        if not (0 <= len(filename_bytes) <= 0xFFFF):
-            raise ValueError("Filename length is out of range.")
-        if not (0 <= len(request.payload.payload) <= 0xFFFFFFFF):
-            raise ValueError("Payload size is out of range.")
-        
-        print(request.__dict__)
-        print(request.payload.__dict__)
+        validate_range("filename length", len(filename_bytes), "uint16_t")
+        validate_range("payload size", len(request.payload.payload), "uint32_t")
         
         # Pack the request data into a bytes object
         request_data = struct.pack(
@@ -153,8 +154,6 @@ class Client:
             request.payload.payload
         )
 
-        print(binascii.hexlify(request_data))
-
         return request_data
 
     def unpack_response(self, data: bytes) -> Response:
@@ -166,9 +165,6 @@ class Client:
         filename_end = filename_start + name_len
 
         # Unpack the filename from the data
-        print(f"filename_start: {filename_start}, filename_end: {filename_end}")
-        print(f"data slice: {data[filename_start:filename_end]}")
-
         filename = data[filename_start:filename_end].decode('ascii')
 
         # Unpack the payload size from the data
@@ -194,7 +190,8 @@ class Client:
         print(f"Filename: {response.filename}")
         if (response.payload is not None):
             print(f"Payload size: {response.payload.size}")
-            print(f"Payload: {response.payload.payload}")
+            # print(f"Payload: {response.payload.payload}")
+        print()
 
 class RequestGenerator:
     def __init__(self, user_id):
