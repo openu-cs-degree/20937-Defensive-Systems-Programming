@@ -7,6 +7,7 @@
 #include <string_view>
 #include <cstdint>
 #include <memory>
+#include <algorithm>
 
 #undef DELETE // the DELETE macro collides with Op::DELETE definition
 
@@ -218,13 +219,14 @@ namespace
     case Op::LIST:
     {
       // Generate a random string of 32 characters
-      static constexpr std::string_view characters = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
       static constexpr size_t file_name_length = 32;
-      std::string random_string;
-      for (size_t i = 0; i < file_name_length; ++i)
+      auto generate_random_character = []() -> char
       {
-        random_string += characters[rand() % characters.size()];
-      }
+        static constexpr std::string_view characters = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+        return characters[rand() % characters.size()];
+      };
+      std::string random_string(file_name_length, 0);
+      std::generate_n(random_string.begin(), file_name_length, generate_random_character);
       file_path = dir_path / random_string;
 
       std::ofstream file(file_path);
