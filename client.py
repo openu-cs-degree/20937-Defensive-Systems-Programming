@@ -114,21 +114,20 @@ class Client:
     def __init__(self, ip_address: str, port: int):
         self.ip_address = ip_address
         self.port = port
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
-        self.socket.connect((self.ip_address, self.port))
 
     def send_request(self, request: Request):
-        self.socket.send(self.pack_request(request))
-        data = self.socket.recv(1024)
-        data += self.socket.recv(1024)
-        data += self.socket.recv(1024)
-        data += self.socket.recv(1024)
-        print(f'received response: {binascii.hexlify(data)}')
-        response = self.unpack_response(data)
-        self.print_response(response)
+        socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
+        socket.connect((self.ip_address, self.port))
+        socket.send(self.pack_request(request))
 
-    def __del__(self):
-        self.socket.close()
+        data = socket.recv(1024)
+        data += socket.recv(1024)
+        data += socket.recv(1024)
+        data += socket.recv(1024)
+        response = self.unpack_response(data)
+        self.print_response(response) # TODO: send back to the user?
+
+        socket.close()
 
     def pack_request(self, request: Request) -> bytes:
         # Convert the filename to bytes
@@ -201,7 +200,9 @@ class RequestGenerator:
     def __init__(self, user_id):
         self.user_id = user_id
 
-    def generate_save_request(self, filename: str, content: bytes) -> Request:
+    def generate_save_request(self, filename: str) -> Request:
+        with open(filename, "rb") as f:
+            content = f.read()
         payload_obj = Payload(len(content), content)
         request = Request(self.user_id, VERSION, Op.SAVE, len(filename), filename, payload_obj)
 
@@ -227,20 +228,24 @@ class RequestGenerator:
 
 def main():
     uniqueIDGenerator = UniqueIDGenerator() 
-    unique_id = uniqueIDGenerator.generate_unique_id()
-    unique_id = 53764
+    unique_id = uniqueIDGenerator.generate_unique_id() # step 1
+    unique_id = 53764 # TODO: remove
 
     reader = FileHandler()
-    ip_address, port = reader.read_server_info()
-    filenames = reader.read_backup_info()
+    ip_address, port = reader.read_server_info() # step 2
+    filenames = reader.read_backup_info() # step 3
+    # TODO: make sure len(filenames) >= 2
 
     client = Client(ip_address, port)
+
     generator = RequestGenerator(unique_id)
-    save_request = generator.generate_save_request("abcdefghi", b'a')
-    restore_request = generator.generate_restore_request("abcdefghi")
-    delete_request = generator.generate_delete_request("abcdefghi")
-    list_request = generator.generate_list_request()
-    client.send_request(list_request)
+    client.send_request(generator.generate_list_request()) # step 4
+    client.send_request(generator.generate_save_request(filenames[0])) # step 5
+    client.send_request(generator.generate_save_request(filenames[1])) # step 6
+    client.send_request(generator.generate_list_request()) # step 7
+    client.send_request(generator.generate_restore_request(filenames[0])) # step 8, TODO: save on tmp
+    client.send_request(generator.generate_delete_request(filenames[0])) # step 9
+    client.send_request(generator.generate_restore_request(filenames[0])) # step 10
 
 if __name__ == "__main__":
     main()
