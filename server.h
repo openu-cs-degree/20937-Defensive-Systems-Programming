@@ -28,13 +28,14 @@ namespace maman14
 
     static void start(uint16_t port)
     {
+      boost::asio::io_context io_context;
+      tcp::socket socket(io_context);
+      tcp::acceptor acceptor(io_context, tcp::endpoint(tcp::v4(), port));
+
       try
       {
         while (true)
         {
-          boost::asio::io_context io_context;
-          tcp::socket socket(io_context);
-          tcp::acceptor acceptor(io_context, tcp::endpoint(tcp::v4(), port));
           acceptor.accept(socket);
 
           std::thread(Server::handle_client, std::move(socket)).detach();
