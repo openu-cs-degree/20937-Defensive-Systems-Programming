@@ -71,16 +71,16 @@ namespace maman14
       std::cout << "name_len: " << request.name_len << '\n';
 
       // Read the filename
-      request.filename = std::make_unique<char[]>(request.name_len + 1);
+      request.filename = std::make_unique<char[]>(request.name_len);
       boost::asio::read(socket, boost::asio::buffer(request.filename.get(), request.name_len), error);
-      request.filename[request.name_len] = '\0';
+      // request.filename[request.name_len] = '\0';
 
       if (error)
       {
         std::cout << "Error reading filename: " << error.message() << '\n';
         return std::nullopt;
       }
-      std::cout << "filename: " << request.filename.get() << '\n';
+      // std::cout << "filename: " << request.filename.get() << '\n';
 
       // Read the size of the payload
       boost::asio::read(socket, boost::asio::buffer(&request.payload.size, sizeof(request.payload.size)), error);
@@ -108,6 +108,7 @@ namespace maman14
     {
       std::cout << "process_request\n";
       Response response{Server::VERSION, Status::ERROR_GENERAL, request.name_len, std::move(request.filename), std::move(request.payload)};
+      // std::cout << "moved response filename: " << response.filename.get() << '\n';
       // no borrow-checking, beware of using request.filename and request.payload after this point!
 
       // Construct the directory path
@@ -117,7 +118,7 @@ namespace maman14
       std::filesystem::create_directories(dir_path);
 
       // Construct the file path
-      std::filesystem::path file_path = dir_path / response.filename.get();
+      std::filesystem::path file_path = dir_path / (response.filename.get() + '\0');
 
       switch (request.op)
       {
@@ -242,6 +243,7 @@ namespace maman14
       }
 
       // Write the filename
+      // std::cout << "about to write filename: " << response.filename.get() << '\n';
       boost::asio::write(socket, boost::asio::buffer(response.filename.get(), response.name_len), error);
 
       if (error)
@@ -297,12 +299,12 @@ namespace maman14
       }
 
       std::cout << "Response ready\n";
-      // std::cout << "version: " << respone->version << '\n';
-      // std::cout << "status: " << static_cast<uint16_t>(respone->status) << '\n';
-      // std::cout << "name_len: " << respone->name_len << '\n';
-      // std::cout << "filename: " << respone->filename.get() << '\n';
-      // std::cout << "payload size: " << respone->payload.size << '\n';
-      // std::cout << "payload: " << respone->payload.payload.get() << '\n';
+      std::cout << "version: " << static_cast<uint16_t>(respone->version) << '\n';
+      std::cout << "status: " << static_cast<uint16_t>(respone->status) << '\n';
+      std::cout << "name_len: " << respone->name_len << '\n';
+      std::cout << "filename: " << (respone->filename.get() + '\0') << '\n';
+      std::cout << "payload size: " << respone->payload.size << '\n';
+      std::cout << "payload: " << respone->payload.payload.get() << '\n';
 
       write_response(socket, respone.value());
     }
