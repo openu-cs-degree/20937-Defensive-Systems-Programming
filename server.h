@@ -2,6 +2,8 @@
 #include <boost/asio.hpp>
 #include <thread>
 #include <optional>
+#include <filesystem>
+#include <fstream>
 
 #include "common.h"
 
@@ -13,7 +15,8 @@ namespace maman14
   class Server
   {
   public:
-    static constexpr uint8_t VERSION = 1;
+    static constexpr inline uint8_t VERSION = 1;
+    static constexpr inline std::string_view SERVER_DIR_NAME = "my_server";
 
   public:
     Server(uint16_t port)
@@ -72,8 +75,9 @@ namespace maman14
       std::cout << "name_len: " << request.name_len << '\n';
 
       // Read the filename
-      request.filename = std::make_unique<char[]>(request.name_len);
+      request.filename = std::make_unique<char[]>(request.name_len + 1);
       boost::asio::read(socket, boost::asio::buffer(request.filename.get(), request.name_len), error);
+      request.filename[request.name_len] = '\0';
 
       if (error)
       {
@@ -108,12 +112,41 @@ namespace maman14
     {
       std::cout << "process_request\n";
       Response response{Server::VERSION, Status::ERROR_GENERAL, request.name_len, std::move(request.filename), std::move(request.payload)};
+      // no borrow-checking, beware of using request.filename and request.payload after this point!
 
       switch (request.op)
       {
       case Op::SAVE:
+      {
+        // Construct the directory path
+        std::filesystem::path dir_path = std::filesystem::path("C:\\") / SERVER_DIR_NAME / std::to_string(request.user_id);
+
+        // Create the directory if it doesn't exist
+        std::filesystem::create_directories(dir_path);
+
+        // Construct the file path
+        std::filesystem::path file_path = dir_path / response.filename.get();
+
+        // Open the file and write the payload to it
+        std::ofstream file(file_path, std::ios::binary);
+        if (!file)
+        {
+          std::cerr << "Failed to open file: " << file_path << '\n';
+          response.status = Status::ERROR_GENERAL;
+          break;
+        }
+
+        file.write(reinterpret_cast<const char *>(response.payload.payload.get()), response.payload.size);
+        if (!file)
+        {
+          std::cerr << "Failed to write to file: " << file_path << '\n';
+          response.status = Status::ERROR_GENERAL;
+          break;
+        }
+
         response.status = Status::SUCCESS_SAVE;
         break;
+      }
       case Op::RESTORE:
         response.status = Status::SUCCESS_RESTORE;
         break;
