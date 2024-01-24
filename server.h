@@ -238,13 +238,15 @@ namespace
       }
 
       // Iterate over the files in the directory and write their names to the new file
-      for (const auto &entry : std::filesystem::directory_iterator(dir_path))
-      {
-        if (auto filename = entry.path().filename(); filename != random_string)
-        {
-          file << filename << '\n';
-        }
-      }
+      std::for_each(std::filesystem::directory_iterator(dir_path),
+                    std::filesystem::directory_iterator(),
+                    [&](const auto &entry)
+                    {
+                      if (auto filename = entry.path().filename(); filename != random_string)
+                      {
+                        file << filename << '\n';
+                      }
+                    });
 
       response.status = Status::SUCCESS_LIST;
       break;
