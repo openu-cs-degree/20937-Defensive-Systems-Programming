@@ -118,7 +118,10 @@ namespace maman14
       std::filesystem::create_directories(dir_path);
 
       // Construct the file path
-      std::filesystem::path file_path = dir_path / (response.filename.get() + '\0');
+      std::string null_terminated_filename(response.filename.get(), request.name_len);
+      null_terminated_filename += '\0';
+      std::cout << "null_terminated_filename: " << null_terminated_filename << '\n';
+      std::filesystem::path file_path = dir_path / null_terminated_filename;
 
       switch (request.op)
       {
@@ -291,22 +294,24 @@ namespace maman14
       // std::cout << "payload size: " << request->payload.size << '\n';
       // std::cout << "payload: " << request->payload.payload.get() << '\n';
 
-      auto respone = process_request(request.value());
-      if (!respone)
+      auto response = process_request(request.value());
+      if (!response)
       {
         std::cout << "Request processing failed!" << '\n';
         return;
       }
 
       std::cout << "Response ready\n";
-      std::cout << "version: " << static_cast<uint16_t>(respone->version) << '\n';
-      std::cout << "status: " << static_cast<uint16_t>(respone->status) << '\n';
-      std::cout << "name_len: " << respone->name_len << '\n';
-      std::cout << "filename: " << (respone->filename.get() + '\0') << '\n';
-      std::cout << "payload size: " << respone->payload.size << '\n';
-      std::cout << "payload: " << respone->payload.payload.get() << '\n';
+      std::cout << "version: " << static_cast<uint16_t>(response->version) << '\n';
+      std::cout << "status: " << static_cast<uint16_t>(response->status) << '\n';
+      std::cout << "name_len: " << response->name_len << '\n';
+      std::string null_terminated_filename(response->filename.get(), response->name_len);
+      null_terminated_filename += '\0';
+      std::cout << "filename: " << null_terminated_filename << '\n';
+      std::cout << "payload size: " << response->payload.size << '\n';
+      std::cout << "payload: " << response->payload.payload.get() << '\n';
 
-      write_response(socket, respone.value());
+      write_response(socket, response.value());
     }
   };
 
