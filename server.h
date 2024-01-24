@@ -51,7 +51,10 @@ namespace maman14
 
     static std::optional<Request> read_request(tcp::socket &socket)
     {
-      std::cout << "read_request\n";
+      std::cout << "read_request\n"
+                << "sizeof(Request): " << sizeof(Request) << '\n'
+                << "offsetof(Request, filename): " << offsetof(Request, filename) << '\n';
+
       boost::system::error_code error;
 
       // Read the fixed-size part of the request
@@ -63,7 +66,10 @@ namespace maman14
         std::cout << "Error reading name_len: " << error.message() << '\n';
         return std::nullopt;
       }
-      request.name_len -= 11567; // TEMP: putty's connection sets name_len to 11568
+      std::cout << "user_id: " << request.user_id << '\n';
+      std::cout << "version: " << static_cast<uint16_t>(request.version) << '\n';
+      std::cout << "op: " << static_cast<uint16_t>(request.op) << '\n';
+      std::cout << "name_len: " << request.name_len << '\n';
 
       // Read the filename
       request.filename = std::make_unique<char[]>(request.name_len);
@@ -74,6 +80,7 @@ namespace maman14
         std::cout << "Error reading filename: " << error.message() << '\n';
         return std::nullopt;
       }
+      std::cout << "filename: " << request.filename.get() << '\n';
 
       // Read the size of the payload
       boost::asio::read(socket, boost::asio::buffer(&request.payload.size, sizeof(request.payload.size)), error);
@@ -83,7 +90,6 @@ namespace maman14
         std::cout << "Error: " << error.message() << '\n';
         return std::nullopt;
       }
-      request.payload.size -= 1498698868; // TEMP: putty's connection sets name_len to 1498698869
 
       // Read the payload
       request.payload.payload = std::make_unique<uint8_t[]>(request.payload.size);
