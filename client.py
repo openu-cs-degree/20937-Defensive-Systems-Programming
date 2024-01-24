@@ -120,6 +120,10 @@ class Client:
     def send_request(self, request: Request):
         self.socket.send(self.pack_request(request))
         data = self.socket.recv(1024)
+        data += self.socket.recv(1024)
+        data += self.socket.recv(1024)
+        data += self.socket.recv(1024)
+        print(f'received response: {binascii.hexlify(data)}')
         response = self.unpack_response(data)
         self.print_response(response)
 
@@ -163,18 +167,24 @@ class Client:
         filename_end = filename_start + name_len
 
         # Unpack the filename from the data
-        filename = data[filename_start:filename_end].decode('utf-8')
+        print(f"filename_start: {filename_start}, filename_end: {filename_end}")
+        print(f"data slice: {data[filename_start:filename_end]}")
+
+        filename = data[filename_start:filename_end].decode('ascii')
 
         # Unpack the payload size from the data
-        payload_size = struct.unpack('!I', data[filename_end:filename_end+4])[0]
+        if len(data) < filename_end + 4:
+            payload_obj = None
+        else:
+            payload_size = struct.unpack('<I', data[filename_end:filename_end+4])[0]
 
-        # Unpack the payload from the data
-        payload_start = filename_end + 4
-        payload_end = payload_start + payload_size
-        payload = data[payload_start:payload_end]
+            # Unpack the payload from the data
+            payload_start = filename_end + 4
+            payload_end = payload_start + payload_size
+            payload = data[payload_start:payload_end]
 
-        # Create a Payload object
-        payload_obj = Payload(payload_size, payload)
+            # Create a Payload object
+            payload_obj = Payload(payload_size, payload)
 
         # Create a Response object
         response = Response(version, Status(status), name_len, filename, payload_obj)
@@ -184,8 +194,11 @@ class Client:
     def print_response(self, response: Response):
         print(f"Version: {response.version}")
         print(f"Status: {response.status}")
+        print(f"Name length: {response.name_len}")
         print(f"Filename: {response.filename}")
-        print(f"Payload: {response.payload.payload}")
+        if (response.payload is not None):
+            print(f"Payload size: {response.payload.size}")
+            print(f"Payload: {response.payload.payload}")
 
 def generate_save_request(user_id: int, filename: str, payload: bytes) -> Request:
     payload_obj = Payload(len(payload), payload)
@@ -205,7 +218,6 @@ def main():
     client = Client(ip_address, port)
     save_request = generate_save_request(unique_id, "abcdefghi", b'a')
     client.send_request(save_request)
-    # TODO: pack_request fails. figure out y.
 
 if __name__ == "__main__":
     main()
