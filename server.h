@@ -509,16 +509,21 @@ namespace
     {
       // Generate a random string of 32 characters
       static constexpr uint16_t file_name_length = 32;
-      auto generate_random_character = []() -> char
+      auto generate_random_string = []() -> std::string
       {
-        static constexpr std::string_view characters = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-        return characters[rand() % characters.size()];
+        auto generate_random_character = []() -> char
+        {
+          static constexpr std::string_view characters = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+          return characters[rand() % characters.size()];
+        };
+        std::string random_string(file_name_length, 0);
+        std::generate_n(random_string.begin(), file_name_length, generate_random_character);
+        return random_string;
       };
-      std::string random_string(file_name_length, 0);
-      std::generate_n(random_string.begin(), file_name_length, generate_random_character);
+      const auto list_file_name = generate_random_string();
 
       // Create a new file with the random string as its name
-      std::filesystem::path file_path = dir_path / random_string;
+      std::filesystem::path file_path = dir_path / list_file_name;
       std::fstream file(file_path, std::ios::in | std::ios::out | std::ios::trunc);
       if (!file)
       {
@@ -531,7 +536,7 @@ namespace
                     std::filesystem::directory_iterator(),
                     [&](const auto &entry)
                     {
-                      if (auto filename = entry.path().filename(); filename != random_string)
+                      if (auto filename = entry.path().filename(); filename != list_file_name)
                       {
                         file << filename << '\n';
                       }
@@ -552,7 +557,7 @@ namespace
 
       // prepare the response
       auto filename = std::make_unique<char[]>(file_name_length);
-      std::move(random_string.begin(), random_string.end(), filename.get()); // TODO: check null termination
+      std::move(list_file_name.begin(), list_file_name.end(), filename.get()); // TODO: check null termination
       auto content = std::make_unique<uint8_t[]>(static_cast<uint32_t>(file_size));
       std::move(file_content.begin(), file_content.end(), content.get());
       return std::make_unique<ResponseSuccessList>(file_name_length, std::move(filename), Payload{static_cast<uint32_t>(file_size), std::move(content)});
