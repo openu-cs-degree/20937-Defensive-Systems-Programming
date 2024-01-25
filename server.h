@@ -339,10 +339,7 @@ namespace
       return {};
     }
 
-    // Determine the type of the request based on the op field
-    switch (header->op)
-    {
-    case Op::SAVE:
+    auto read_name_len_and_filename = [&]() -> std::optional<std::pair<uint16_t, std::unique_ptr<char[]>>>
     {
       uint16_t name_len;
       boost::asio::read(socket, boost::asio::buffer(&name_len, sizeof(name_len)), error);
@@ -359,6 +356,22 @@ namespace
         std::cerr << "Failed to read filename: " << error.message() << '\n';
         return {};
       }
+
+      return std::make_pair(name_len, std::move(filename));
+    };
+
+    // Determine the type of the request based on the op field
+    switch (header->op)
+    {
+    case Op::SAVE:
+    {
+      auto pair = read_name_len_and_filename();
+      if (!pair)
+      {
+        return {};
+      }
+
+      auto &[name_len, filename] = *pair;
 
       Payload payload;
       boost::asio::read(socket, boost::asio::buffer(&payload.size, sizeof(payload.size)), error);
@@ -380,21 +393,13 @@ namespace
     case Op::RESTORE:
     case Op::DELETE:
     {
-      uint16_t name_len;
-      boost::asio::read(socket, boost::asio::buffer(&name_len, sizeof(name_len)), error);
-      if (error)
+      auto pair = read_name_len_and_filename();
+      if (!pair)
       {
-        std::cerr << "Failed to read name_len: " << error.message() << '\n';
         return {};
       }
 
-      std::unique_ptr<char[]> filename(new char[name_len]);
-      boost::asio::read(socket, boost::asio::buffer(filename.get(), name_len), error);
-      if (error)
-      {
-        std::cerr << "Failed to read filename: " << error.message() << '\n';
-        return {};
-      }
+      auto &[name_len, filename] = *pair;
 
       if (header->op == Op::RESTORE)
       {
