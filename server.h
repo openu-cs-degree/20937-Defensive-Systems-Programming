@@ -112,6 +112,13 @@ namespace
       return std::make_tuple(data.user_id, data.version, data.op);
     }
 
+    std::filesystem::path create_and_get_user_dir_path() const
+    {
+      std::filesystem::path dir_path = std::filesystem::path("C:\\") / maman14::SERVER_DIR_NAME / std::to_string(user_id);
+      std::filesystem::create_directories(dir_path);
+      return dir_path;
+    }
+
     virtual std::unique_ptr<Response> process() = 0;
 
     virtual void print(std::ostream &os) const
@@ -139,6 +146,12 @@ namespace
     std::unique_ptr<char[]> filename;
 
     virtual ~RequestWithFileName() = default;
+
+    std::filesystem::path create_and_get_user_file_path() const
+    {
+      std::filesystem::path dir_path = create_and_get_user_dir_path();
+      return dir_path / std::string_view(filename.get(), name_len);
+    }
 
     virtual void print(std::ostream &os) const
     {
@@ -371,9 +384,7 @@ namespace
 
     std::unique_ptr<Response> process() override
     {
-      std::filesystem::path dir_path = std::filesystem::path("C:\\") / maman14::SERVER_DIR_NAME / std::to_string(user_id);
-      std::filesystem::create_directories(dir_path);
-      std::filesystem::path file_path = dir_path / std::string_view(filename.get(), name_len);
+      auto file_path = create_and_get_user_file_path();
 
       // Open the file and write the payload to it
       std::ofstream file(file_path, std::ios::binary);
@@ -401,9 +412,7 @@ namespace
 
     std::unique_ptr<Response> process() override
     {
-      std::filesystem::path dir_path = std::filesystem::path("C:\\") / maman14::SERVER_DIR_NAME / std::to_string(user_id);
-      std::filesystem::create_directories(dir_path);
-      std::filesystem::path file_path = dir_path / std::string_view(filename.get(), name_len);
+      auto file_path = create_and_get_user_file_path();
 
       // Open the file and read its contents
       std::ifstream file(file_path, std::ios::binary | std::ios::ate);
@@ -435,9 +444,7 @@ namespace
 
     std::unique_ptr<Response> process() override
     {
-      std::filesystem::path dir_path = std::filesystem::path("C:\\") / maman14::SERVER_DIR_NAME / std::to_string(user_id);
-      std::filesystem::create_directories(dir_path);
-      std::filesystem::path file_path = dir_path / std::string_view(filename.get(), name_len);
+      auto file_path = create_and_get_user_file_path();
 
       if (std::error_code ec; !std::filesystem::remove(file_path, ec))
       {
@@ -456,8 +463,7 @@ namespace
 
     std::unique_ptr<Response> process() override
     {
-      std::filesystem::path dir_path = std::filesystem::path("C:\\") / maman14::SERVER_DIR_NAME / std::to_string(user_id);
-      std::filesystem::create_directories(dir_path);
+      std::filesystem::path dir_path = create_and_get_user_dir_path();
 
       // Generate a random string of 32 characters
       static constexpr uint16_t file_name_length = 32;
