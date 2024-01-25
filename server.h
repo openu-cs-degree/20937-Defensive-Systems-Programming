@@ -385,29 +385,11 @@ namespace
 
     auto &[user_id, version, op] = *user_id_and_version_and_op;
 
-    // Determine the type of the request based on the op field
-    switch (op)
+    if (op == Op::LIST)
     {
-    case Op::SAVE:
-    {
-      auto name_len_and_filename = RequestWithFileName::read_name_len_and_filename(socket, error);
-      if (!name_len_and_filename)
-      {
-        return {};
-      }
-
-      auto &[name_len, filename] = *name_len_and_filename;
-
-      auto payload = RequestWithPayload::read_payload(socket, error);
-      if (!payload)
-      {
-        return {};
-      }
-
-      return std::make_unique<RequestSave>(user_id, version, name_len, std::move(filename), std::move(payload.value()));
+      return std::make_unique<RequestList>(user_id, version);
     }
-    case Op::RESTORE:
-    case Op::DELETE:
+    if (op == Op::RESTORE || op == Op::DELETE || op == Op::SAVE)
     {
       auto name_len_and_filename = RequestWithFileName::read_name_len_and_filename(socket, error);
       if (!name_len_and_filename)
@@ -421,13 +403,20 @@ namespace
       {
         return std::make_unique<RequestRestore>(user_id, version, name_len, std::move(filename));
       }
-      else
+      else if (op == Op::DELETE)
       {
         return std::make_unique<RequestDelete>(user_id, version, name_len, std::move(filename));
       }
-    }
-    case Op::LIST:
-      return std::make_unique<RequestList>(user_id, version);
+      else
+      {
+        auto payload = RequestWithPayload::read_payload(socket, error);
+        if (!payload)
+        {
+          return {};
+        }
+
+        return std::make_unique<RequestSave>(user_id, version, name_len, std::move(filename), std::move(payload.value()));
+      }
     }
 
     return {};
