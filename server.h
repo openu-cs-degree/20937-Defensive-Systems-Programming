@@ -53,10 +53,20 @@ namespace
 namespace
 {
 #pragma pack(push, 1)
+
+  // Payload struct, used by both Request and Response
+
   struct Payload
   {
-    uint32_t size{};
-    std::unique_ptr<uint8_t[]> content{};
+    uint32_t size;
+    std::unique_ptr<uint8_t[]> content;
+
+  private:
+    Payload() = default;
+
+  public:
+    Payload(uint32_t size, std::unique_ptr<uint8_t[]> content)
+        : size(size), content(std::move(content)){};
 
     bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
     {
@@ -75,6 +85,26 @@ namespace
       }
 
       return true;
+    };
+
+    static std::optional<Payload> read_from_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+    {
+      Payload payload;
+      boost::asio::read(socket, boost::asio::buffer(&payload.size, sizeof(payload.size)), error);
+      if (error)
+      {
+        std::cerr << "Failed to read payload size: " << error.message() << '\n';
+        return {};
+      }
+      payload.content = std::make_unique<uint8_t[]>(payload.size);
+      boost::asio::read(socket, boost::asio::buffer(payload.content.get(), payload.size), error);
+      if (error)
+      {
+        std::cerr << "Failed to read payload content: " << error.message() << '\n';
+        return {};
+      }
+
+      return payload;
     };
 
     friend std::ostream &operator<<(std::ostream &os, const Payload &payload)
@@ -218,22 +248,7 @@ namespace
 
     static std::optional<Payload> read_payload(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
     {
-      Payload payload;
-      boost::asio::read(socket, boost::asio::buffer(&payload.size, sizeof(payload.size)), error);
-      if (error)
-      {
-        std::cerr << "Failed to read payload size: " << error.message() << '\n';
-        return {};
-      }
-      payload.content = std::make_unique<uint8_t[]>(payload.size);
-      boost::asio::read(socket, boost::asio::buffer(payload.content.get(), payload.size), error);
-      if (error)
-      {
-        std::cerr << "Failed to read payload content: " << error.message() << '\n';
-        return {};
-      }
-
-      return payload;
+      return Payload::read_from_socket(socket, error);
     };
   };
 
