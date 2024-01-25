@@ -57,6 +57,14 @@ namespace
   {
     uint32_t size{};
     std::unique_ptr<uint8_t[]> content{};
+
+    friend std::ostream &operator<<(std::ostream &os, const Payload &payload)
+    {
+      os << "payload size: " << payload.size << '\n';
+      os << "payload:\n"
+         << std::string_view(reinterpret_cast<const char *>(payload.content.get()), payload.size) << '\n';
+      return os;
+    }
   };
 
   // Requests
@@ -74,14 +82,12 @@ namespace
 
     static std::optional<std::tuple<uint32_t, uint8_t, Op>> read_user_id_and_version_and_op(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
     {
-#pragma pack(push, 1)
       struct RequestData
       {
         uint32_t user_id;
         uint8_t version;
         Op op;
       };
-#pragma pack(pop)
       RequestData data;
 
       boost::asio::read(socket, boost::asio::buffer(&data, sizeof(data)), error);
@@ -165,8 +171,7 @@ namespace
     virtual void print(std::ostream &os) const
     {
       RequestWithFileName::print(os);
-      os << "payload size: " << payload.size << '\n';
-      os << "payload: " << payload.content.get() << '\n';
+      os << payload << '\n';
     }
 
     static std::optional<Payload> read_payload(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
@@ -329,8 +334,7 @@ namespace
     virtual void print(std::ostream &os) const
     {
       ResponseWithFileName::print(os);
-      os << "payload size: " << payload.size << '\n';
-      os << "payload: " << payload.content.get() << '\n';
+      os << payload << '\n';
     }
   };
 
