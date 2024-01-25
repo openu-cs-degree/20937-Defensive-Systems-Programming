@@ -72,29 +72,32 @@ namespace
     uint8_t version;
     Op op;
 
-    static std::optional<Request> read_from_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+    static std::optional<std::tuple<uint32_t, uint8_t, Op>> read_user_id_and_version_and_op(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
     {
-      Request request(0, 0, static_cast<Op>(0));
+#pragma pack(push, 1)
+      struct RequestData
+      {
+        uint32_t user_id;
+        uint8_t version;
+        Op op;
+      };
+#pragma pack(pop)
+      RequestData data;
 
-      boost::asio::read(socket, boost::asio::buffer(&request.user_id, sizeof(user_id) + sizeof(version) + sizeof(op)), error);
+      boost::asio::read(socket, boost::asio::buffer(&data, sizeof(data)), error);
       if (error)
       {
         std::cerr << "Failed to read request: " << error.message() << '\n';
         return std::nullopt;
       }
 
-      // std::cout << "request read so far:\n"
-      //           << "user_id: " << request.user_id << '\n'
-      //           << "version: " << static_cast<uint16_t>(request.version) << '\n'
-      //           << "op: " << static_cast<uint16_t>(request.op) << '\n';
-
-      if (!is_valid_op(static_cast<uint8_t>(request.op)))
+      if (!is_valid_op(static_cast<uint8_t>(data.op)))
       {
-        std::cerr << "Invalid op: " << static_cast<uint16_t>(request.op) << '\n';
+        std::cerr << "Invalid op: " << static_cast<uint16_t>(data.op) << '\n';
         return std::nullopt;
       }
 
-      return request;
+      return std::make_tuple(data.user_id, data.version, data.op);
     }
 
     virtual void print(std::ostream &os) const
@@ -127,6 +130,27 @@ namespace
       os << "name_len: " << name_len << '\n';
       os << "filename: " << std::string_view(filename.get(), name_len) << '\n';
     }
+
+    static std::optional<std::pair<uint16_t, std::unique_ptr<char[]>>> read_name_len_and_filename(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+    {
+      uint16_t name_len;
+      boost::asio::read(socket, boost::asio::buffer(&name_len, sizeof(name_len)), error);
+      if (error)
+      {
+        std::cerr << "Failed to read name_len: " << error.message() << '\n';
+        return {};
+      }
+
+      std::unique_ptr<char[]> filename(new char[name_len]);
+      boost::asio::read(socket, boost::asio::buffer(filename.get(), name_len), error);
+      if (error)
+      {
+        std::cerr << "Failed to read filename: " << error.message() << '\n';
+        return {};
+      }
+
+      return std::make_pair(name_len, std::move(filename));
+    };
   };
 
   struct RequestWithPayload : public RequestWithFileName
@@ -144,6 +168,26 @@ namespace
       os << "payload size: " << payload.size << '\n';
       os << "payload: " << payload.content.get() << '\n';
     }
+
+    static std::optional<Payload> read_payload(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+    {
+      Payload payload;
+      boost::asio::read(socket, boost::asio::buffer(&payload.size, sizeof(payload.size)), error);
+      if (error)
+      {
+        std::cerr << "Failed to read payload size: " << error.message() << '\n';
+        return {};
+      }
+      payload.content = std::make_unique<uint8_t[]>(payload.size);
+      boost::asio::read(socket, boost::asio::buffer(payload.content.get(), payload.size), error);
+      if (error)
+      {
+        std::cerr << "Failed to read payload content: " << error.message() << '\n';
+        return {};
+      }
+
+      return payload;
+    };
   };
 
   struct RequestSave : public RequestWithPayload
@@ -333,86 +377,57 @@ namespace
   std::unique_ptr<Request> read_request(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
   {
     // Read the common part of the request
-    auto header = Request::read_from_socket(socket, error);
-    if (!header)
+    auto user_id_and_version_and_op = Request::read_user_id_and_version_and_op(socket, error);
+    if (!user_id_and_version_and_op)
     {
       return {};
     }
 
-    auto read_name_len_and_filename = [&]() -> std::optional<std::pair<uint16_t, std::unique_ptr<char[]>>>
-    {
-      uint16_t name_len;
-      boost::asio::read(socket, boost::asio::buffer(&name_len, sizeof(name_len)), error);
-      if (error)
-      {
-        std::cerr << "Failed to read name_len: " << error.message() << '\n';
-        return {};
-      }
-
-      std::unique_ptr<char[]> filename(new char[name_len]);
-      boost::asio::read(socket, boost::asio::buffer(filename.get(), name_len), error);
-      if (error)
-      {
-        std::cerr << "Failed to read filename: " << error.message() << '\n';
-        return {};
-      }
-
-      return std::make_pair(name_len, std::move(filename));
-    };
+    auto &[user_id, version, op] = *user_id_and_version_and_op;
 
     // Determine the type of the request based on the op field
-    switch (header->op)
+    switch (op)
     {
     case Op::SAVE:
     {
-      auto pair = read_name_len_and_filename();
-      if (!pair)
+      auto name_len_and_filename = RequestWithFileName::read_name_len_and_filename(socket, error);
+      if (!name_len_and_filename)
       {
         return {};
       }
 
-      auto &[name_len, filename] = *pair;
+      auto &[name_len, filename] = *name_len_and_filename;
 
-      Payload payload;
-      boost::asio::read(socket, boost::asio::buffer(&payload.size, sizeof(payload.size)), error);
-      if (error)
+      auto payload = RequestWithPayload::read_payload(socket, error);
+      if (!payload)
       {
-        std::cerr << "Failed to read payload size: " << error.message() << '\n';
-        return {};
-      }
-      payload.content = std::make_unique<uint8_t[]>(payload.size);
-      boost::asio::read(socket, boost::asio::buffer(payload.content.get(), payload.size), error);
-      if (error)
-      {
-        std::cerr << "Failed to read payload content: " << error.message() << '\n';
         return {};
       }
 
-      return std::make_unique<RequestSave>(header->user_id, header->version, name_len, std::move(filename), std::move(payload));
+      return std::make_unique<RequestSave>(user_id, version, name_len, std::move(filename), std::move(payload.value()));
     }
     case Op::RESTORE:
     case Op::DELETE:
     {
-      auto pair = read_name_len_and_filename();
-      if (!pair)
+      auto name_len_and_filename = RequestWithFileName::read_name_len_and_filename(socket, error);
+      if (!name_len_and_filename)
       {
         return {};
       }
 
-      auto &[name_len, filename] = *pair;
+      auto &[name_len, filename] = *name_len_and_filename;
 
-      if (header->op == Op::RESTORE)
+      if (op == Op::RESTORE)
       {
-        return std::make_unique<RequestRestore>(header->user_id, header->version, name_len, std::move(filename));
+        return std::make_unique<RequestRestore>(user_id, version, name_len, std::move(filename));
       }
       else
       {
-        return std::make_unique<RequestDelete>(header->user_id, header->version, name_len, std::move(filename));
+        return std::make_unique<RequestDelete>(user_id, version, name_len, std::move(filename));
       }
     }
     case Op::LIST:
-      // return std::make_unique<RequestList>(*reinterpret_cast<RequestList *>(&header.value())); // I wanted to play with fire but I was told not to
-      return std::make_unique<RequestList>(header->user_id, header->version);
+      return std::make_unique<RequestList>(user_id, version);
     }
 
     return {};
