@@ -205,7 +205,7 @@ namespace
     };
   };
 
-  // Responses
+  // Response base classes
 
   struct Response
   {
@@ -324,37 +324,39 @@ namespace
     }
   };
 
-  struct ResponseSuccessRestore : public ResponseWithPayload
+  // Response concrete structs (final, non-abstract)
+
+  struct ResponseSuccessRestore final : public ResponseWithPayload
   {
     ResponseSuccessRestore(uint16_t name_len, std::unique_ptr<char[]> filename, Payload payload)
         : ResponseWithPayload(maman14::SERVER_VERSION, Status::SUCCESS_RESTORE, name_len, std::move(filename), std::move(payload)){};
   };
 
-  struct ResponseSuccessList : public ResponseWithPayload
+  struct ResponseSuccessList final : public ResponseWithPayload
   {
     ResponseSuccessList(uint16_t name_len, std::unique_ptr<char[]> filename, Payload payload)
         : ResponseWithPayload(maman14::SERVER_VERSION, Status::SUCCESS_LIST, name_len, std::move(filename), std::move(payload)){};
   };
 
-  struct ResponseSuccessSave : public ResponseWithFileName
+  struct ResponseSuccessSave final : public ResponseWithFileName
   {
     ResponseSuccessSave(uint16_t name_len, std::unique_ptr<char[]> filename)
         : ResponseWithFileName(maman14::SERVER_VERSION, Status::SUCCESS_SAVE, name_len, std::move(filename)){};
   };
 
-  struct ResponseErrorNoFile : public ResponseWithFileName
+  struct ResponseErrorNoFile final : public ResponseWithFileName
   {
     ResponseErrorNoFile(uint16_t name_len, std::unique_ptr<char[]> filename)
         : ResponseWithFileName(maman14::SERVER_VERSION, Status::ERROR_NO_FILE, name_len, std::move(filename)){};
   };
 
-  struct ResponseErrorNoClient : public Response
+  struct ResponseErrorNoClient final : public Response
   {
     ResponseErrorNoClient()
         : Response(maman14::SERVER_VERSION, Status::ERROR_NO_CLIENT){};
   };
 
-  struct ResponseErrorGeneral : public Response
+  struct ResponseErrorGeneral final : public Response
   {
     ResponseErrorGeneral()
         : Response(maman14::SERVER_VERSION, Status::ERROR_GENERAL){};
