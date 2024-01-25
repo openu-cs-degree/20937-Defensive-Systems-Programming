@@ -15,8 +15,6 @@
 
 #undef DELETE // the DELETE macro collides with Op::DELETE definition
 
-using boost::asio::ip::tcp;
-
 #ifdef __GNUC__
 #define PACK(__Declaration__) __Declaration__ __attribute__((__packed__))
 #endif
@@ -77,7 +75,7 @@ namespace maman14
 
 namespace
 {
-  std::optional<Request> read_request(tcp::socket &socket)
+  std::optional<Request> read_request(boost::asio::ip::tcp::socket &socket)
   {
     std::cout << "read_request\n"
               << "sizeof(Request): " << sizeof(Request) << '\n'
@@ -263,7 +261,7 @@ namespace
     return response;
   }
 
-  void write_response(tcp::socket &socket, Response &response)
+  void write_response(boost::asio::ip::tcp::socket &socket, Response &response)
   {
     std::cout << "write_response\n";
     boost::system::error_code error;
@@ -308,7 +306,7 @@ namespace
     std::cout << "Response sent\n";
   }
 
-  void handle_client(tcp::socket socket)
+  void handle_client(boost::asio::ip::tcp::socket socket)
   {
     auto request = read_request(socket);
     if (!request)
@@ -351,6 +349,8 @@ namespace maman14
 {
   static void start_server_on_port(uint16_t port)
   {
+    using boost::asio::ip::tcp;
+
     boost::asio::io_context io_context;
     tcp::socket socket(io_context);
     tcp::acceptor acceptor(io_context, tcp::endpoint(tcp::v4(), port));
