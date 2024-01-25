@@ -4,8 +4,9 @@ import binascii # TODO: remove
 import socket
 from enum import Enum
 import struct
+from abc import ABC
 
-VERSION = 1
+VERSION = 3
 
 class Op(Enum):
     SAVE = 100
@@ -20,6 +21,8 @@ class Status(Enum):
     ERROR_NO_FILE = 1001
     ERROR_NO_CLIENT = 1002
     ERROR_GENERAL = 1003
+
+# validations
     
 def validate_range(var_name: str, number: int, uint_type: Literal["uint8_t", "uint16_t", "uint32_t", "uint64_t"]) -> None:
     ranges = {
@@ -32,39 +35,145 @@ def validate_range(var_name: str, number: int, uint_type: Literal["uint8_t", "ui
     min_val, max_val = ranges[uint_type]
     if not (min_val <= number <= max_val):
         raise ValueError(f"{var_name} {number} is out of range for {uint_type}.")
+
+def validate_op(op: Op) -> None:
+    if op not in Op:
+        raise ValueError(f"Invalid op: {op.value}")
     
+def validate_status(status: Status) -> None:
+    if status not in Status:
+        raise ValueError(f"Invalid status: {status}")
+
 class Payload:
     def __init__(self, size: int, payload: bytes):
         validate_range("payload.size", size, "uint32_t")
-
+ 
         self.size = size
         self.payload = payload
 
-class Request:
-    def __init__(self, user_id: int, version: int, op: Op, name_len: int, filename: str, payload: Payload):
+# requests
+
+class _RequestBase(ABC):
+    def __init__(self, user_id: int, version: int, op: Op):
         validate_range("user_id", user_id, "uint32_t")
         validate_range("version", version, "uint8_t")
-        validate_range("op", op.value, "uint8_t")
-        validate_range("name_len", name_len, "uint16_t")
+        validate_op(op)
         
         self.user_id = user_id
         self.version = version
         self.op = op.value
-        self.name_len = name_len
+
+    def pack(self) -> bytes:
+        return struct.pack(
+            f'<I B B',
+            self.user_id,
+            self.version,
+            self.op
+        )
+
+Request = _RequestBase
+
+class _RequestWithFileName(_RequestBase):
+    def __init__(self, user_id: int, version: int, op: Op, filename: str):
+        super().__init__(user_id, version, op)
+        self.name_len = len(filename)
         self.filename = filename
-        self.payload = payload
+    
+    def pack(self) -> bytes:
+        return struct.pack(
+            f'<I B B H {self.name_len}s',
+            self.user_id,
+            self.version,
+            self.op,
+            self.name_len,
+            self.filename.encode('utf-8')
+        )
 
-class Response:
-    def __init__(self, version: int, status: Status, name_len: int, filename: str, payload: Payload):
-        validate_range("version", version, "uint8_t")
-        validate_range("status", status.value, "uint16_t")
-        validate_range("name_len", name_len, "uint16_t")
+class RequestList(_RequestBase):
+    def __init__(self, user_id: int, version: int):
+        super().__init__(user_id, version, Op.LIST)
 
+class RequestRestore(_RequestWithFileName):
+    def __init__(self, user_id: int, version: int, filename: str):
+        super().__init__(user_id, version, Op.RESTORE, filename)
+
+class RequestDelete(_RequestWithFileName):
+    def __init__(self, user_id: int, version: int, filename: str):
+        super().__init__(user_id, version, Op.DELETE, filename)
+
+class RequestSave(_RequestWithFileName):
+    def __init__(self, user_id: int, version: int, filename: str, file_content: bytes):
+        super().__init__(user_id, version, Op.SAVE, filename)
+        self.payload = Payload(len(file_content), file_content)
+
+    def pack(self) -> bytes:
+        filename_bytes = self.filename.encode('utf-8')
+        return struct.pack(
+            f'<I B B H {len(filename_bytes)}s I {len(self.payload.payload)}s',
+            self.user_id,
+            self.version,
+            Op.SAVE.value,
+            len(filename_bytes),
+            filename_bytes,
+            len(self.payload.payload),
+            self.payload.payload
+        )
+
+# responses
+    
+class _ResponseBase(ABC):
+    def __init__(self, version: int, status: Status):
         self.version = version
         self.status = status
+
+    def __str__(self) -> str:
+        return f"Version: {self.version}\nStatus: {self.status}"
+        
+Response = _ResponseBase
+
+class ResponseErrorGeneral(_ResponseBase):
+    def __init__(self, version: int):
+        super().__init__(version, Status.ERROR_GENERAL)
+
+class ResponseErrorNoClient(_ResponseBase):
+    def __init__(self, version: int):
+        super().__init__(version, Status.ERROR_NO_CLIENT)
+
+class _ResponseWithFileName(_ResponseBase):
+    def __init__(self, version: int, status: Status, name_len: int, filename: str):
+        super().__init__(version, status)
+
         self.name_len = name_len
         self.filename = filename
+    
+    def __str__(self) -> str:
+        return super().__str__() + f"\nName length: {self.name_len}\nFilename: {self.filename}"
+
+class ResponseSuccessSave(_ResponseWithFileName):
+    def __init__(self, version: int, name_len: int, filename: str):
+        super().__init__(version, Status.SUCCESS_SAVE, name_len, filename)
+
+class ResponseErrorNoFile(_ResponseWithFileName):
+    def __init__(self, version: int, name_len: int, filename: str):
+        super().__init__(version, Status.ERROR_NO_FILE, name_len, filename)
+
+class _ResponseWithFileNameAndPayload(_ResponseWithFileName):
+    def __init__(self, version: int, status: Status, name_len: int, filename: str, payload: Payload):
+        super().__init__(version, status, name_len, filename)
+        validate_range("payload_size", payload.size, "uint32_t")
+        
         self.payload = payload
+    
+    def __str__(self) -> str:
+        return f"Version: {self.version}\nStatus: {self.status}\nName length: {self.name_len}\nFilename: {self.filename}\nPayload size: {self.payload.size}"
+
+class ResponseSuccessRestore(_ResponseWithFileNameAndPayload):
+    def __init__(self, version: int, name_len: int, filename: str, payload: Payload):
+        super().__init__(version, Status.SUCCESS_RESTORE, name_len, filename, payload)
+
+class ResponseSuccessList(_ResponseWithFileNameAndPayload):
+    def __init__(self, version: int, name_len: int, filename: str, payload: Payload):
+        super().__init__(version, Status.SUCCESS_LIST, name_len, filename, payload)
 
 class FileHandler:
     SERVER_INFO_FILE = "server.info"
@@ -127,74 +236,82 @@ class Client:
     def send_request(self, request: Request):
         my_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
         my_socket.connect((self.ip_address, self.port))
-        my_socket.send(self.pack_request(request))
+        b = self.pack_request(request)
+        print(binascii.hexlify(b))
+        my_socket.send(b)
 
-        data = my_socket.recv(1024)
-        data += my_socket.recv(1024)
-        data += my_socket.recv(1024)
-        data += my_socket.recv(1024)
+        data = b""
+        while True:
+            part = my_socket.recv(1024)
+            if not part:
+                break 
+            data += part
+
         response = self.unpack_response(data)
-        self.print_response(response) # TODO: send back to the user?
+        print(response, '\n\n')
 
         my_socket.close()
 
+    # TODO: I don't think we need this method
     def pack_request(self, request: Request) -> bytes:
         # Convert the filename to bytes
-        filename_bytes = request.filename.encode('utf-8')
+        # filename_bytes = request.filename.encode('utf-8')
 
-        validate_range("filename length", len(filename_bytes), "uint16_t")
-        validate_range("payload size", len(request.payload.payload), "uint32_t")
-        
-        # Pack the request data into a bytes object
-        request_data = struct.pack(
-            f'<I B B H {len(filename_bytes)}s I {len(request.payload.payload)}s',
-            request.user_id,
-            request.version,
-            request.op,
-            len(filename_bytes),
-            filename_bytes,
-            len(request.payload.payload),
-            request.payload.payload
-        )
+        # validate_range("filename length", len(filename_bytes), "uint16_t")
+        # validate_range("payload size", len(request.payload.payload), "uint32_t")
 
-        return request_data
+        return request.pack()
 
     def unpack_response(self, data: bytes) -> Response:
-        # Unpack the version and status from the first part of the response
-        version, status, name_len = struct.unpack('<B H H', data[:5])
+        if len(data) < 3:
+            raise Exception(f"Response too short; got {len(data)} bytes but expected at least 3")
+        
+        # Unpack the version and status
+        version, status = struct.unpack('<B H', data[:3])
+        status = Status(status)
+        validate_range("version", version, "uint8_t")
+        validate_status(status)
 
-        # Calculate the start and end indices of the filename in the data
+        if status == Status.ERROR_GENERAL:
+            return ResponseErrorGeneral(version)
+        elif status == Status.ERROR_NO_CLIENT:
+            return ResponseErrorNoClient(version)
+        
+        if len(data) < 5:
+            raise Exception(f"Response too short; got {len(data)} bytes but expected at least 5")
+        
+        # Unpack the name_len and filename
+        name_len = struct.unpack('<H', data[3:5])[0]
+        validate_range("name_len", name_len, "uint16_t")
         filename_start = 5
         filename_end = filename_start + name_len
-
-        # Unpack the filename from the data
         filename = data[filename_start:filename_end].decode('ascii')
+        if len(filename) != name_len:
+            raise ValueError(f"filename length ({len(filename)}) does not match name_len ({name_len}).")
 
-        # Unpack the payload size from the data
+        if status == Status.SUCCESS_SAVE:
+            return ResponseSuccessSave(version, name_len, filename)
+        elif status == Status.ERROR_NO_FILE:
+            return ResponseErrorNoFile(version, name_len, filename)
+        
+        if len(data) < filename_end + 4:
+            raise Exception(f"Response too short; got {len(data)} bytes but expected at least {filename_end + 4}")
+
+        # Unpack the payload
         payload_size = struct.unpack('<I', data[filename_end:filename_end+4])[0]
+        validate_range("payload_size", payload_size, "uint32_t")
 
-        # Unpack the payload from the data
         payload_start = filename_end + 4
         payload_end = payload_start + payload_size
         payload = data[payload_start:payload_end]
-
-        # Create a Payload object
         payload_obj = Payload(payload_size, payload)
 
-        # Create a Response object
-        response = Response(version, Status(status), name_len, filename, payload_obj)
-
-        return response
-
-    def print_response(self, response: Response):
-        print(f"Version: {response.version}")
-        print(f"Status: {response.status}")
-        print(f"Name length: {response.name_len}")
-        print(f"Filename: {response.filename}")
-        if (response.payload is not None):
-            print(f"Payload size: {response.payload.size}")
-            # print(f"Payload: {response.payload.payload}")
-        print()
+        if status == Status.SUCCESS_RESTORE:
+            return ResponseSuccessRestore(version, name_len, filename, payload_obj)
+        elif status == Status.SUCCESS_LIST:
+            return ResponseSuccessList(version, name_len, filename, payload_obj)
+        
+        raise Exception(f"Invalid status: {status}")
 
 class RequestGenerator:
     def __init__(self, user_id):
@@ -203,28 +320,16 @@ class RequestGenerator:
     def generate_save_request(self, filename: str) -> Request:
         with open(filename, "rb") as f:
             content = f.read()
-        payload_obj = Payload(len(content), content)
-        request = Request(self.user_id, VERSION, Op.SAVE, len(filename), filename, payload_obj)
-
-        return request
+        return RequestSave(self.user_id, VERSION, filename, content)
 
     def generate_restore_request(self, filename: str) -> Request:
-        empty_payload = Payload(0, b'')
-        request = Request(self.user_id, VERSION, Op.RESTORE, len(filename), filename, empty_payload)
-
-        return request
-
+        return RequestRestore(self.user_id, VERSION, filename)
+    
     def generate_delete_request(self, filename: str) -> Request:
-        empty_payload = Payload(0, b'')
-        request = Request(self.user_id, VERSION, Op.DELETE, len(filename), filename, empty_payload)
-
-        return request
+        return RequestDelete(self.user_id, VERSION, filename)
 
     def generate_list_request(self) -> Request:
-        empty_payload = Payload(0, b'')
-        request = Request(self.user_id, VERSION, Op.LIST, 0, '', empty_payload)
-
-        return request
+        return RequestList(self.user_id, VERSION)
 
 def main():
     uniqueIDGenerator = UniqueIDGenerator() 
