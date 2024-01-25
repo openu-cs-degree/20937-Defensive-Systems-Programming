@@ -67,6 +67,10 @@ namespace
     }
   };
 
+  // forward declare Response so that it can be used in Request's process()
+
+  struct Response;
+
   // Requests
 
   struct Request
@@ -79,6 +83,8 @@ namespace
     uint32_t user_id;
     uint8_t version;
     Op op;
+
+    virtual ~Request() = default;
 
     static std::optional<std::tuple<uint32_t, uint8_t, Op>> read_user_id_and_version_and_op(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
     {
@@ -106,6 +112,8 @@ namespace
       return std::make_tuple(data.user_id, data.version, data.op);
     }
 
+    virtual std::unique_ptr<Response> process() = 0;
+
     virtual void print(std::ostream &os) const
     {
       os << "user_id: " << user_id << '\n';
@@ -129,6 +137,8 @@ namespace
   public:
     uint16_t name_len;
     std::unique_ptr<char[]> filename;
+
+    virtual ~RequestWithFileName() = default;
 
     virtual void print(std::ostream &os) const
     {
@@ -168,7 +178,7 @@ namespace
   public:
     Payload payload;
 
-    virtual void print(std::ostream &os) const
+    void print(std::ostream &os) const
     {
       RequestWithFileName::print(os);
       os << payload << '\n';
@@ -193,30 +203,6 @@ namespace
 
       return payload;
     };
-  };
-
-  struct RequestSave : public RequestWithPayload
-  {
-    RequestSave(uint32_t user_id, uint8_t version, uint16_t name_len, std::unique_ptr<char[]> filename, Payload payload)
-        : RequestWithPayload(user_id, version, Op::SAVE, name_len, std::move(filename), std::move(payload)){};
-  };
-
-  struct RequestRestore : public RequestWithFileName
-  {
-    RequestRestore(uint32_t user_id, uint8_t version, uint16_t name_len, std::unique_ptr<char[]> filename)
-        : RequestWithFileName(user_id, version, Op::RESTORE, name_len, std::move(filename)){};
-  };
-
-  struct RequestDelete : public RequestWithFileName
-  {
-    RequestDelete(uint32_t user_id, uint8_t version, uint16_t name_len, std::unique_ptr<char[]> filename)
-        : RequestWithFileName(user_id, version, Op::DELETE, name_len, std::move(filename)){};
-  };
-
-  struct RequestList : public Request
-  {
-    RequestList(uint32_t user_id, uint8_t version)
-        : Request(user_id, version, Op::LIST){};
   };
 
   // Responses
@@ -373,72 +359,19 @@ namespace
     ResponseErrorGeneral()
         : Response(maman14::SERVER_VERSION, Status::ERROR_GENERAL){};
   };
-#pragma pack(pop)
-} // anonymous namespace
 
-namespace
-{
-  std::unique_ptr<Request> read_request(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+  // non-abstract structs
+
+  struct RequestSave : public RequestWithPayload
   {
-    // Read the common part of the request
-    auto user_id_and_version_and_op = Request::read_user_id_and_version_and_op(socket, error);
-    if (!user_id_and_version_and_op)
+    RequestSave(uint32_t user_id, uint8_t version, uint16_t name_len, std::unique_ptr<char[]> filename, Payload payload)
+        : RequestWithPayload(user_id, version, Op::SAVE, name_len, std::move(filename), std::move(payload)){};
+
+    std::unique_ptr<Response> process() override
     {
-      return {};
-    }
-
-    auto &[user_id, version, op] = *user_id_and_version_and_op;
-
-    if (op == Op::LIST)
-    {
-      return std::make_unique<RequestList>(user_id, version);
-    }
-    if (op == Op::RESTORE || op == Op::DELETE || op == Op::SAVE)
-    {
-      auto name_len_and_filename = RequestWithFileName::read_name_len_and_filename(socket, error);
-      if (!name_len_and_filename)
-      {
-        return {};
-      }
-
-      auto &[name_len, filename] = *name_len_and_filename;
-
-      if (op == Op::RESTORE)
-      {
-        return std::make_unique<RequestRestore>(user_id, version, name_len, std::move(filename));
-      }
-      else if (op == Op::DELETE)
-      {
-        return std::make_unique<RequestDelete>(user_id, version, name_len, std::move(filename));
-      }
-      else
-      {
-        auto payload = RequestWithPayload::read_payload(socket, error);
-        if (!payload)
-        {
-          return {};
-        }
-
-        return std::make_unique<RequestSave>(user_id, version, name_len, std::move(filename), std::move(payload.value()));
-      }
-    }
-
-    return {};
-  }
-
-  std::unique_ptr<Response> process_request(Request &request)
-  {
-    // Construct and create user's directory if it doesn't exist yet
-    std::filesystem::path dir_path = std::filesystem::path("C:\\") / maman14::SERVER_DIR_NAME / std::to_string(request.user_id);
-    std::filesystem::create_directories(dir_path);
-
-    switch (request.op)
-    {
-    case Op::SAVE:
-    {
-      RequestSave &request_as_save = reinterpret_cast<RequestSave &>(request);
-
-      std::filesystem::path file_path = dir_path / std::string_view(request_as_save.filename.get(), request_as_save.name_len);
+      std::filesystem::path dir_path = std::filesystem::path("C:\\") / maman14::SERVER_DIR_NAME / std::to_string(user_id);
+      std::filesystem::create_directories(dir_path);
+      std::filesystem::path file_path = dir_path / std::string_view(filename.get(), name_len);
 
       // Open the file and write the payload to it
       std::ofstream file(file_path, std::ios::binary);
@@ -448,20 +381,27 @@ namespace
         return std::make_unique<ResponseErrorGeneral>();
       }
 
-      file.write(reinterpret_cast<const char *>(request_as_save.payload.content.get()), request_as_save.payload.size);
+      file.write(reinterpret_cast<const char *>(payload.content.get()), payload.size);
       if (!file)
       {
         std::cerr << "Failed to write to file: " << file_path << '\n';
         return std::make_unique<ResponseErrorGeneral>();
       }
 
-      return std::make_unique<ResponseSuccessSave>(request_as_save.name_len, std::move(request_as_save.filename));
+      return std::make_unique<ResponseSuccessSave>(name_len, std::move(filename));
     }
-    case Op::RESTORE:
-    {
-      RequestRestore &request_as_restore = reinterpret_cast<RequestRestore &>(request);
+  };
 
-      std::filesystem::path file_path = dir_path / std::string_view(request_as_restore.filename.get(), request_as_restore.name_len);
+  struct RequestRestore : public RequestWithFileName
+  {
+    RequestRestore(uint32_t user_id, uint8_t version, uint16_t name_len, std::unique_ptr<char[]> filename)
+        : RequestWithFileName(user_id, version, Op::RESTORE, name_len, std::move(filename)){};
+
+    std::unique_ptr<Response> process() override
+    {
+      std::filesystem::path dir_path = std::filesystem::path("C:\\") / maman14::SERVER_DIR_NAME / std::to_string(user_id);
+      std::filesystem::create_directories(dir_path);
+      std::filesystem::path file_path = dir_path / std::string_view(filename.get(), name_len);
 
       // Open the file and read its contents
       std::ifstream file(file_path, std::ios::binary | std::ios::ate);
@@ -482,13 +422,20 @@ namespace
         return std::make_unique<ResponseErrorGeneral>();
       }
 
-      return std::make_unique<ResponseSuccessRestore>(request_as_restore.name_len, std::move(request_as_restore.filename), std::move(payload));
+      return std::make_unique<ResponseSuccessRestore>(name_len, std::move(filename), std::move(payload));
     }
-    case Op::DELETE:
-    {
-      RequestDelete &request_as_delete = reinterpret_cast<RequestDelete &>(request);
+  };
 
-      std::filesystem::path file_path = dir_path / std::string_view(request_as_delete.filename.get(), request_as_delete.name_len);
+  struct RequestDelete : public RequestWithFileName
+  {
+    RequestDelete(uint32_t user_id, uint8_t version, uint16_t name_len, std::unique_ptr<char[]> filename)
+        : RequestWithFileName(user_id, version, Op::DELETE, name_len, std::move(filename)){};
+
+    std::unique_ptr<Response> process() override
+    {
+      std::filesystem::path dir_path = std::filesystem::path("C:\\") / maman14::SERVER_DIR_NAME / std::to_string(user_id);
+      std::filesystem::create_directories(dir_path);
+      std::filesystem::path file_path = dir_path / std::string_view(filename.get(), name_len);
 
       if (std::error_code ec; !std::filesystem::remove(file_path, ec))
       {
@@ -496,10 +443,20 @@ namespace
         return std::make_unique<ResponseErrorGeneral>();
       }
 
-      return std::make_unique<ResponseSuccessSave>(request_as_delete.name_len, std::move(request_as_delete.filename));
+      return std::make_unique<ResponseSuccessSave>(name_len, std::move(filename));
     }
-    case Op::LIST:
+  };
+
+  struct RequestList : public Request
+  {
+    RequestList(uint32_t user_id, uint8_t version)
+        : Request(user_id, version, Op::LIST){};
+
+    std::unique_ptr<Response> process() override
     {
+      std::filesystem::path dir_path = std::filesystem::path("C:\\") / maman14::SERVER_DIR_NAME / std::to_string(user_id);
+      std::filesystem::create_directories(dir_path);
+
       // Generate a random string of 32 characters
       static constexpr uint16_t file_name_length = 32;
       auto generate_random_string = []() -> std::string
@@ -555,10 +512,58 @@ namespace
       std::move(file_content.begin(), file_content.end(), content.get());
       return std::make_unique<ResponseSuccessList>(file_name_length, std::move(filename), Payload{static_cast<uint32_t>(file_size), std::move(content)});
     }
+  };
+#pragma pack(pop)
+} // anonymous namespace
+
+namespace
+{
+  std::unique_ptr<Request> read_request(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+  {
+    // Read the common part of the request
+    auto user_id_and_version_and_op = Request::read_user_id_and_version_and_op(socket, error);
+    if (!user_id_and_version_and_op)
+    {
+      return {};
     }
 
-    // TODO: log something to the user?
-    return std::make_unique<ResponseErrorGeneral>();
+    auto &[user_id, version, op] = *user_id_and_version_and_op;
+
+    if (op == Op::LIST)
+    {
+      return std::make_unique<RequestList>(user_id, version);
+    }
+    if (op == Op::RESTORE || op == Op::DELETE || op == Op::SAVE)
+    {
+      auto name_len_and_filename = RequestWithFileName::read_name_len_and_filename(socket, error);
+      if (!name_len_and_filename)
+      {
+        return {};
+      }
+
+      auto &[name_len, filename] = *name_len_and_filename;
+
+      if (op == Op::RESTORE)
+      {
+        return std::make_unique<RequestRestore>(user_id, version, name_len, std::move(filename));
+      }
+      else if (op == Op::DELETE)
+      {
+        return std::make_unique<RequestDelete>(user_id, version, name_len, std::move(filename));
+      }
+      else
+      {
+        auto payload = RequestWithPayload::read_payload(socket, error);
+        if (!payload)
+        {
+          return {};
+        }
+
+        return std::make_unique<RequestSave>(user_id, version, name_len, std::move(filename), std::move(payload.value()));
+      }
+    }
+
+    return {};
   }
 
   void handle_client(boost::asio::ip::tcp::socket socket)
@@ -575,7 +580,7 @@ namespace
     std::cout << *request << '\n';
 
     std::cout << "Generating response:\n";
-    auto response = process_request(*request);
+    auto response = request->process();
     if (!response)
     {
       std::cout << "Request processing failed!" << '\n';
