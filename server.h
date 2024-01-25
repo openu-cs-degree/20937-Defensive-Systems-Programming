@@ -206,16 +206,10 @@ namespace
       return os;
     }
 
-  private:
-    static Response *create_raw_general_error()
-    {
-      return new Response(maman14::SERVER_VERSION, Status::ERROR_GENERAL);
-    }
-
   public:
     static std::unique_ptr<Response> create_general_error()
     {
-      return std::unique_ptr<Response>(create_raw_general_error());
+      return std::unique_ptr<Response>(new Response(maman14::SERVER_VERSION, Status::ERROR_GENERAL));
     }
   };
 
