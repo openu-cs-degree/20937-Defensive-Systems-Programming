@@ -438,11 +438,7 @@ namespace
     {
       RequestSave &request_as_save = reinterpret_cast<RequestSave &>(request);
 
-      // Construct the file path
-      std::string null_terminated_filename(request_as_save.filename.get(), request_as_save.name_len);
-      null_terminated_filename += '\0';
-      std::cout << "null_terminated_filename: " << null_terminated_filename << '\n';
-      std::filesystem::path file_path = dir_path / null_terminated_filename;
+      std::filesystem::path file_path = dir_path / std::string_view(request_as_save.filename.get(), request_as_save.name_len);
 
       // Open the file and write the payload to it
       std::ofstream file(file_path, std::ios::binary);
@@ -465,11 +461,7 @@ namespace
     {
       RequestRestore &request_as_restore = reinterpret_cast<RequestRestore &>(request);
 
-      // Construct the file path
-      std::string null_terminated_filename(request_as_restore.filename.get(), request_as_restore.name_len);
-      null_terminated_filename += '\0';
-      std::cout << "null_terminated_filename: " << null_terminated_filename << '\n';
-      std::filesystem::path file_path = dir_path / null_terminated_filename;
+      std::filesystem::path file_path = dir_path / std::string_view(request_as_restore.filename.get(), request_as_restore.name_len);
 
       // Open the file and read its contents
       std::ifstream file(file_path, std::ios::binary | std::ios::ate);
@@ -496,11 +488,7 @@ namespace
     {
       RequestDelete &request_as_delete = reinterpret_cast<RequestDelete &>(request);
 
-      // Construct the file path
-      std::string null_terminated_filename(request_as_delete.filename.get(), request_as_delete.name_len);
-      null_terminated_filename += '\0';
-      std::cout << "null_terminated_filename: " << null_terminated_filename << '\n';
-      std::filesystem::path file_path = dir_path / null_terminated_filename;
+      std::filesystem::path file_path = dir_path / std::string_view(request_as_delete.filename.get(), request_as_delete.name_len);
 
       if (std::error_code ec; !std::filesystem::remove(file_path, ec))
       {
