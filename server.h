@@ -205,12 +205,6 @@ namespace
       response.print(os);
       return os;
     }
-
-  public:
-    static std::unique_ptr<Response> create_general_error()
-    {
-      return std::unique_ptr<Response>(new Response(maman14::SERVER_VERSION, Status::ERROR_GENERAL));
-    }
   };
 
   struct ResponseWithFileName : public Response
@@ -444,14 +438,14 @@ namespace
       if (!file)
       {
         std::cerr << "Failed to open file: " << file_path << '\n';
-        return Response::create_general_error();
+        return std::make_unique<ResponseErrorGeneral>();
       }
 
       file.write(reinterpret_cast<const char *>(request_as_save.payload.content.get()), request_as_save.payload.size);
       if (!file)
       {
         std::cerr << "Failed to write to file: " << file_path << '\n';
-        return Response::create_general_error();
+        return std::make_unique<ResponseErrorGeneral>();
       }
 
       return std::make_unique<ResponseSuccessSave>(request_as_save.name_len, std::move(request_as_save.filename));
@@ -471,7 +465,7 @@ namespace
       if (!file)
       {
         std::cerr << "Failed to open file: " << file_path << '\n';
-        return Response::create_general_error();
+        return std::make_unique<ResponseErrorGeneral>();
       }
 
       std::streamsize size = file.tellg();
@@ -482,7 +476,7 @@ namespace
       if (!file.read(reinterpret_cast<char *>(payload.content.get()), size))
       {
         std::cerr << "Failed to read file: " << file_path << '\n';
-        return Response::create_general_error();
+        return std::make_unique<ResponseErrorGeneral>();
       }
 
       return std::make_unique<ResponseSuccessRestore>(request_as_restore.name_len, std::move(request_as_restore.filename), std::move(payload));
@@ -500,7 +494,7 @@ namespace
       if (std::error_code ec; !std::filesystem::remove(file_path, ec))
       {
         std::cerr << "Failed to delete file: " << file_path << '\n';
-        return Response::create_general_error();
+        return std::make_unique<ResponseErrorGeneral>();
       }
 
       return std::make_unique<ResponseSuccessSave>(request_as_delete.name_len, std::move(request_as_delete.filename));
@@ -528,7 +522,7 @@ namespace
       if (!file)
       {
         std::cerr << "Failed to create file: " << file_path << '\n';
-        return Response::create_general_error();
+        return std::make_unique<ResponseErrorGeneral>();
       }
 
       // Iterate over the files in the directory and write their names to the new file
@@ -547,7 +541,7 @@ namespace
       if (file_size > std::numeric_limits<uint32_t>::max())
       {
         std::cerr << "File size is too big: " << file_size << '\n';
-        return Response::create_general_error();
+        return std::make_unique<ResponseErrorGeneral>();
       }
 
       // Reset the file pointer to the beginning of the file in order to read its contents to the payload
@@ -565,7 +559,7 @@ namespace
     }
 
     // TODO: log something to the user?
-    return Response::create_general_error();
+    return std::make_unique<ResponseErrorGeneral>();
   }
 
   void write_response(boost::asio::ip::tcp::socket &socket, Response &response)
