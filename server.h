@@ -71,7 +71,7 @@ namespace
 
   struct Response;
 
-  // Requests
+  // Requests base classes
 
   struct Request
   {
@@ -360,9 +360,9 @@ namespace
         : Response(maman14::SERVER_VERSION, Status::ERROR_GENERAL){};
   };
 
-  // non-abstract structs
+  // Request concrete structs (final, non-abstract)
 
-  struct RequestSave : public RequestWithPayload
+  struct RequestSave final : public RequestWithPayload
   {
     RequestSave(uint32_t user_id, uint8_t version, uint16_t name_len, std::unique_ptr<char[]> filename, Payload payload)
         : RequestWithPayload(user_id, version, Op::SAVE, name_len, std::move(filename), std::move(payload)){};
@@ -392,7 +392,7 @@ namespace
     }
   };
 
-  struct RequestRestore : public RequestWithFileName
+  struct RequestRestore final : public RequestWithFileName
   {
     RequestRestore(uint32_t user_id, uint8_t version, uint16_t name_len, std::unique_ptr<char[]> filename)
         : RequestWithFileName(user_id, version, Op::RESTORE, name_len, std::move(filename)){};
@@ -426,7 +426,7 @@ namespace
     }
   };
 
-  struct RequestDelete : public RequestWithFileName
+  struct RequestDelete final : public RequestWithFileName
   {
     RequestDelete(uint32_t user_id, uint8_t version, uint16_t name_len, std::unique_ptr<char[]> filename)
         : RequestWithFileName(user_id, version, Op::DELETE, name_len, std::move(filename)){};
@@ -447,7 +447,7 @@ namespace
     }
   };
 
-  struct RequestList : public Request
+  struct RequestList final : public Request
   {
     RequestList(uint32_t user_id, uint8_t version)
         : Request(user_id, version, Op::LIST){};
