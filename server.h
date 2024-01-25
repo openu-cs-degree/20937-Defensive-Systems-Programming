@@ -58,6 +58,25 @@ namespace
     uint32_t size{};
     std::unique_ptr<uint8_t[]> content{};
 
+    bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+    {
+      boost::asio::write(socket, boost::asio::buffer(&size, sizeof(size)), error);
+      if (error)
+      {
+        std::cerr << "Failed to write payload size: " << error.message() << '\n';
+        return false;
+      }
+
+      boost::asio::write(socket, boost::asio::buffer(content.get(), size), error);
+      if (error)
+      {
+        std::cerr << "Failed to write payload: " << error.message() << '\n';
+        return false;
+      }
+
+      return true;
+    };
+
     friend std::ostream &operator<<(std::ostream &os, const Payload &payload)
     {
       os << "payload size: " << payload.size << '\n';
@@ -313,17 +332,8 @@ namespace
         return false;
       }
 
-      boost::asio::write(socket, boost::asio::buffer(&payload.size, sizeof(payload.size)), error);
-      if (error)
+      if (!payload.write_to_socket(socket, error))
       {
-        std::cerr << "Failed to write payload size: " << error.message() << '\n';
-        return false;
-      }
-
-      boost::asio::write(socket, boost::asio::buffer(payload.content.get(), payload.size), error);
-      if (error)
-      {
-        std::cerr << "Failed to write payload: " << error.message() << '\n';
         return false;
       }
 
