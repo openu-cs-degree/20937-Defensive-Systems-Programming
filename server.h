@@ -15,14 +15,6 @@
 
 #undef DELETE // the DELETE macro collides with Op::DELETE definition
 
-#ifdef __GNUC__
-#define PACK(__Declaration__) __Declaration__ __attribute__((__packed__))
-#endif
-
-#ifdef _MSC_VER
-#define PACK(__Declaration__) __pragma(pack(push, 1)) __Declaration__ __pragma(pack(pop))
-#endif
-
 namespace
 {
   enum class Op : uint8_t
@@ -42,29 +34,6 @@ namespace
     ERROR_NO_CLIENT = 1002, // only version and status
     ERROR_GENERAL = 1003,   // only version and status
   };
-
-  PACK(
-      struct Payload {
-        uint32_t size;
-        std::unique_ptr<uint8_t[]> content;
-      };
-
-      struct Request {
-        uint32_t user_id;
-        uint8_t version;
-        Op op;
-        uint16_t name_len;
-        std::unique_ptr<char[]> filename;
-        Payload payload;
-      };
-
-      struct Response {
-        uint8_t version;
-        Status status;
-        uint16_t name_len;
-        std::unique_ptr<char[]> filename;
-        Payload payload;
-      };)
 } // anonymous namespace
 
 namespace maman14
@@ -72,6 +41,36 @@ namespace maman14
   static constexpr inline uint8_t SERVER_VERSION = 2;
   static constexpr inline std::string_view SERVER_DIR_NAME = "my_server";
 } // namespace maman14
+
+namespace
+{
+#pragma pack(push, 1)
+  struct Payload
+  {
+    uint32_t size;
+    std::unique_ptr<uint8_t[]> content;
+  };
+
+  struct Request
+  {
+    uint32_t user_id;
+    uint8_t version;
+    Op op;
+    uint16_t name_len;
+    std::unique_ptr<char[]> filename;
+    Payload payload;
+  };
+
+  struct Response
+  {
+    uint8_t version;
+    Status status;
+    uint16_t name_len;
+    std::unique_ptr<char[]> filename;
+    Payload payload;
+  };
+#pragma pack(pop)
+}
 
 namespace
 {
