@@ -330,10 +330,8 @@ namespace
 
 namespace
 {
-  std::unique_ptr<Request> read_request(boost::asio::ip::tcp::socket &socket)
+  std::unique_ptr<Request> read_request(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
   {
-    boost::system::error_code error;
-
     // Read the common part of the request
     auto header = Request::read_from_socket(socket, error);
     if (!header)
@@ -562,17 +560,12 @@ namespace
     return std::make_unique<ResponseErrorGeneral>();
   }
 
-  void write_response(boost::asio::ip::tcp::socket &socket, Response &response)
+  void handle_client(boost::asio::ip::tcp::socket socket)
   {
     boost::system::error_code error;
 
-    response.write_to_socket(socket, error);
-  }
-
-  void handle_client(boost::asio::ip::tcp::socket socket)
-  {
     std::cout << "Receiving request:\n";
-    auto request = read_request(socket);
+    auto request = read_request(socket, error);
     if (!request)
     {
       std::cout << "Request reading failed!" << '\n';
@@ -590,7 +583,7 @@ namespace
     std::cout << *response << '\n';
 
     std::cout << "Sending response:\n";
-    write_response(socket, *response);
+    response->write_to_socket(socket, error);
     std::cout << "Response sent\n\n";
   }
 } // anonymous namespace
