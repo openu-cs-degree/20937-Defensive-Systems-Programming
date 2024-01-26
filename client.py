@@ -237,7 +237,7 @@ class Client:
         my_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
         my_socket.connect((self.ip_address, self.port))
         b = self.pack_request(request)
-        print(binascii.hexlify(b))
+        # print(binascii.hexlify(b))
         my_socket.send(b)
 
         data = b""

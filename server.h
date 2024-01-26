@@ -109,9 +109,10 @@ namespace
 
     friend std::ostream &operator<<(std::ostream &os, const Payload &payload)
     {
+      static constexpr uint32_t MAX_PAYLOAD_PRINT_SIZE = 420;
       os << "payload size: " << payload.size << '\n';
-      os << "payload:\n"
-         << std::string_view(reinterpret_cast<const char *>(payload.content.get()), payload.size) << '\n';
+      os << (payload.size > MAX_PAYLOAD_PRINT_SIZE ? "payload (printing limited to 420 bytes):\n" : "payload:\n")
+         << std::string_view(reinterpret_cast<const char *>(payload.content.get()), std::min(payload.size, MAX_PAYLOAD_PRINT_SIZE)) << '\n';
       return os;
     }
   };
