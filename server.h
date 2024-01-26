@@ -168,6 +168,12 @@ namespace
     Filename(uint16_t name_len, std::unique_ptr<char[]> filename)
         : name_len(name_len), filename(std::move(filename)) {}
 
+    Filename(const std::string_view &filename)
+        : name_len(static_cast<uint16_t>(filename.size())), filename(std::make_unique<char[]>(name_len))
+    {
+      std::move(filename.begin(), filename.end(), this->filename.get());
+    }
+
     const std::string_view get_name() const
     {
       return std::string_view(filename.get(), name_len);
@@ -541,62 +547,78 @@ namespace
 
     std::unique_ptr<Response> process() override
     {
-      std::filesystem::path dir_path = create_and_get_user_dir_path();
+      std::filesystem::path user_dir_path = create_and_get_user_dir_path();
+      const auto user_file_name = generate_random_file_name();
+      std::filesystem::path user_file_path = user_dir_path / user_file_name;
 
-      // Generate a random string of 32 characters
-      static constexpr uint16_t file_name_length = 32;
-      auto generate_random_string = []() -> std::string
+      auto optional_file = create_and_get_user_file(user_file_path);
+      if (!optional_file)
       {
-        auto generate_random_character = []() -> char
-        {
-          static constexpr std::string_view characters = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-          return characters[rand() % characters.size()];
-        };
-        std::string random_string(file_name_length, 0);
-        std::generate_n(random_string.begin(), file_name_length, generate_random_character);
-        return random_string;
-      };
-      const auto list_file_name = generate_random_string();
+        return std::make_unique<ResponseErrorGeneral>();
+      }
+      auto &file = *optional_file;
 
-      // Create a new file with the random string as its name
-      std::filesystem::path file_path = dir_path / list_file_name;
+      auto file_size = write_directory_to_file(user_dir_path, user_file_name, file);
+      if (!file_size)
+      {
+        return std::make_unique<ResponseErrorGeneral>();
+      }
+
+      auto payload = Payload::read_from_file(user_file_path);
+      if (!payload)
+      {
+        return std::make_unique<ResponseErrorGeneral>();
+      }
+
+      return std::make_unique<ResponseSuccessList>(Filename(user_file_name), std::move(payload.value()));
+    }
+
+  private:
+    const std::string generate_random_file_name() const
+    {
+      static constexpr uint16_t length = 32;
+      auto generate_random_character = []() -> char
+      {
+        static constexpr std::string_view characters = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+        return characters[rand() % characters.size()];
+      };
+      std::string random_string(length, 0);
+      std::generate_n(random_string.begin(), length, generate_random_character);
+      return random_string;
+    }
+
+    std::optional<std::fstream> create_and_get_user_file(const std::filesystem::path &file_path) const
+    {
       std::fstream file(file_path, std::ios::in | std::ios::out | std::ios::trunc);
       if (!file)
       {
         std::cerr << "Failed to create file: " << file_path << '\n';
-        return std::make_unique<ResponseErrorGeneral>();
+        return std::nullopt;
       }
 
-      // Iterate over the files in the directory and write their names to the new file
-      std::for_each(std::filesystem::directory_iterator(dir_path),
+      return file;
+    }
+
+    std::optional<uint32_t> write_directory_to_file(const std::filesystem::path &src_path, const std::string_view &ignored_filename, std::fstream &dst_file)
+    {
+      std::for_each(std::filesystem::directory_iterator(src_path),
                     std::filesystem::directory_iterator(),
                     [&](const auto &entry)
                     {
-                      if (auto filename = entry.path().filename(); filename != list_file_name)
+                      if (auto filename = entry.path().filename(); filename != ignored_filename)
                       {
-                        file << filename << '\n';
+                        dst_file << filename << '\n';
                       }
                     });
 
-      // Get the size of the file
-      auto file_size = file.tellp();
+      auto file_size = dst_file.tellp();
       if (file_size > std::numeric_limits<uint32_t>::max())
       {
         std::cerr << "File size is too big: " << file_size << '\n';
-        return std::make_unique<ResponseErrorGeneral>();
+        return std::nullopt;
       }
 
-      // Reset the file pointer to the beginning of the file in order to read its contents to the payload
-      file.clear();
-      file.seekg(0, std::ios::beg);
-      std::string file_content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-
-      // prepare the response
-      auto filename = std::make_unique<char[]>(file_name_length);
-      std::move(list_file_name.begin(), list_file_name.end(), filename.get()); // TODO: check null termination
-      auto content = std::make_unique<uint8_t[]>(static_cast<uint32_t>(file_size));
-      std::move(file_content.begin(), file_content.end(), content.get());
-      return std::make_unique<ResponseSuccessList>(Filename{file_name_length, std::move(filename)}, Payload{static_cast<uint32_t>(file_size), std::move(content)});
+      return static_cast<uint32_t>(file_size);
     }
   };
 #pragma pack(pop)
