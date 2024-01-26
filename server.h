@@ -267,11 +267,6 @@ namespace
       Request::print(os);
       os << filename << '\n';
     }
-
-    static std::optional<Filename> read_name_len_and_filename(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
-    {
-      return Filename::read_from_socket(socket, error);
-    };
   };
 
   struct RequestWithPayload : public RequestWithFileName
@@ -288,11 +283,6 @@ namespace
       RequestWithFileName::print(os);
       os << payload << '\n';
     }
-
-    static std::optional<Payload> read_payload(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
-    {
-      return Payload::read_from_socket(socket, error);
-    };
   };
 
   // Response base classes
@@ -600,7 +590,7 @@ namespace
     }
     if (op == Op::RESTORE || op == Op::DELETE || op == Op::SAVE)
     {
-      auto filename = RequestWithFileName::read_name_len_and_filename(socket, error);
+      auto filename = Filename::read_from_socket(socket, error);
       if (!filename)
       {
         return {};
@@ -616,7 +606,7 @@ namespace
       }
       else
       {
-        auto payload = RequestWithPayload::read_payload(socket, error);
+        auto payload = Payload::read_from_socket(socket, error);
         if (!payload)
         {
           return {};
