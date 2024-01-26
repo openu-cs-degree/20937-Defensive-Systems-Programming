@@ -87,6 +87,25 @@ namespace
       return true;
     };
 
+    bool write_to_file(const std::filesystem::path &file_path) const
+    {
+      std::ofstream file(file_path, std::ios::binary | std::ios::trunc);
+      if (!file)
+      {
+        std::cerr << "Failed to open file: " << file_path << '\n';
+        return false;
+      }
+
+      file.write(reinterpret_cast<const char *>(content.get()), size);
+      if (!file)
+      {
+        std::cerr << "Failed to write to file: " << file_path << '\n';
+        return false;
+      }
+
+      return true;
+    }
+
     static std::optional<Payload> read_from_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
     {
       Payload payload;
@@ -106,6 +125,29 @@ namespace
 
       return payload;
     };
+
+    static std::optional<Payload> read_from_file(const std::filesystem::path &file_path)
+    {
+      std::ifstream file(file_path, std::ios::binary | std::ios::ate);
+      if (!file)
+      {
+        std::cerr << "Failed to open file: " << file_path << '\n';
+        return {};
+      }
+
+      std::streamsize size = file.tellg();
+      file.seekg(0, std::ios::beg);
+
+      std::unique_ptr<uint8_t[]> content(new uint8_t[static_cast<uint32_t>(size)]);
+      file.read(reinterpret_cast<char *>(content.get()), size);
+      if (!file)
+      {
+        std::cerr << "Failed to read file: " << file_path << '\n';
+        return {};
+      }
+
+      return Payload{static_cast<uint32_t>(size), std::move(content)};
+    }
 
     friend std::ostream &operator<<(std::ostream &os, const Payload &payload)
     {
@@ -434,18 +476,8 @@ namespace
     {
       auto file_path = create_and_get_user_file_path();
 
-      // Open the file and write the payload to it
-      std::ofstream file(file_path, std::ios::binary);
-      if (!file)
+      if (!payload.write_to_file(file_path))
       {
-        std::cerr << "Failed to open file: " << file_path << '\n';
-        return std::make_unique<ResponseErrorGeneral>();
-      }
-
-      file.write(reinterpret_cast<const char *>(payload.content.get()), payload.size);
-      if (!file)
-      {
-        std::cerr << "Failed to write to file: " << file_path << '\n';
         return std::make_unique<ResponseErrorGeneral>();
       }
 
@@ -462,26 +494,13 @@ namespace
     {
       auto file_path = create_and_get_user_file_path();
 
-      // Open the file and read its contents
-      std::ifstream file(file_path, std::ios::binary | std::ios::ate);
-      if (!file)
+      auto payload = Payload::read_from_file(file_path);
+      if (!payload)
       {
-        std::cerr << "Failed to open file: " << file_path << '\n';
-        return std::make_unique<ResponseErrorGeneral>();
+        return std::make_unique<ResponseErrorNoFile>(std::move(filename));
       }
 
-      std::streamsize size = file.tellg();
-      file.seekg(0, std::ios::beg);
-
-      // Allocate memory for the payload and read the file into it
-      Payload payload{static_cast<size_t>(size), std::make_unique<uint8_t[]>(static_cast<size_t>(size))};
-      if (!file.read(reinterpret_cast<char *>(payload.content.get()), size))
-      {
-        std::cerr << "Failed to read file: " << file_path << '\n';
-        return std::make_unique<ResponseErrorGeneral>();
-      }
-
-      return std::make_unique<ResponseSuccessRestore>(std::move(filename), std::move(payload));
+      return std::make_unique<ResponseSuccessRestore>(std::move(filename), std::move(payload.value()));
     }
   };
 
