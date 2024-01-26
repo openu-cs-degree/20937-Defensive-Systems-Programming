@@ -54,7 +54,7 @@ namespace
 {
 #pragma pack(push, 1)
 
-  // Payload struct, used by both Request and Response
+  // structs to be used by both Request and Response
 
   struct Payload
   {
@@ -112,6 +112,67 @@ namespace
       os << "payload size: " << payload.size << '\n';
       os << "payload:\n"
          << std::string_view(reinterpret_cast<const char *>(payload.content.get()), payload.size) << '\n';
+      return os;
+    }
+  };
+
+  struct Filename
+  {
+    uint16_t name_len;
+    std::unique_ptr<char[]> filename;
+
+    Filename(uint16_t name_len, std::unique_ptr<char[]> filename)
+        : name_len(name_len), filename(std::move(filename)) {}
+
+    const std::string_view get_name() const
+    {
+      return std::string_view(filename.get(), name_len);
+    }
+
+    bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+    {
+      boost::asio::write(socket, boost::asio::buffer(&name_len, sizeof(name_len)), error);
+      if (error)
+      {
+        std::cerr << "Failed to write name_len: " << error.message() << '\n';
+        return false;
+      }
+
+      boost::asio::write(socket, boost::asio::buffer(filename.get(), name_len), error);
+      if (error)
+      {
+        std::cerr << "Failed to write filename: " << error.message() << '\n';
+        return false;
+      }
+
+      return true;
+    }
+
+    static std::optional<Filename> read_from_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+    {
+      uint16_t name_len;
+      boost::asio::read(socket, boost::asio::buffer(&name_len, sizeof(name_len)), error);
+      if (error)
+      {
+        std::cerr << "Failed to read name_len: " << error.message() << '\n';
+        return {};
+      }
+
+      std::unique_ptr<char[]> filename(new char[name_len]);
+      boost::asio::read(socket, boost::asio::buffer(filename.get(), name_len), error);
+      if (error)
+      {
+        std::cerr << "Failed to read filename: " << error.message() << '\n';
+        return {};
+      }
+
+      return Filename{name_len, std::move(filename)};
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, const Filename &filename)
+    {
+      os << "name_len: " << filename.name_len << '\n';
+      os << "filename: " << filename.get_name() << '\n';
       return os;
     }
   };
@@ -187,55 +248,37 @@ namespace
   struct RequestWithFileName : public Request
   {
   protected:
-    RequestWithFileName(uint32_t user_id, uint8_t version, Op op, uint16_t name_len, std::unique_ptr<char[]> filename)
-        : Request(user_id, version, op), name_len(name_len), filename(std::move(filename)){};
+    RequestWithFileName(uint32_t user_id, uint8_t version, Op op, Filename filename)
+        : Request(user_id, version, op), filename(std::move(filename)){};
 
   public:
-    uint16_t name_len;
-    std::unique_ptr<char[]> filename;
+    Filename filename;
 
     virtual ~RequestWithFileName() = default;
 
     std::filesystem::path create_and_get_user_file_path() const
     {
       std::filesystem::path dir_path = create_and_get_user_dir_path();
-      return dir_path / std::string_view(filename.get(), name_len);
+      return dir_path / filename.get_name();
     }
 
     virtual void print(std::ostream &os) const
     {
       Request::print(os);
-      os << "name_len: " << name_len << '\n';
-      os << "filename: " << std::string_view(filename.get(), name_len) << '\n';
+      os << filename << '\n';
     }
 
-    static std::optional<std::pair<uint16_t, std::unique_ptr<char[]>>> read_name_len_and_filename(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+    static std::optional<Filename> read_name_len_and_filename(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
     {
-      uint16_t name_len;
-      boost::asio::read(socket, boost::asio::buffer(&name_len, sizeof(name_len)), error);
-      if (error)
-      {
-        std::cerr << "Failed to read name_len: " << error.message() << '\n';
-        return {};
-      }
-
-      std::unique_ptr<char[]> filename(new char[name_len]);
-      boost::asio::read(socket, boost::asio::buffer(filename.get(), name_len), error);
-      if (error)
-      {
-        std::cerr << "Failed to read filename: " << error.message() << '\n';
-        return {};
-      }
-
-      return std::make_pair(name_len, std::move(filename));
+      return Filename::read_from_socket(socket, error);
     };
   };
 
   struct RequestWithPayload : public RequestWithFileName
   {
   protected:
-    RequestWithPayload(uint32_t user_id, uint8_t version, Op op, uint16_t name_len, std::unique_ptr<char[]> filename, Payload payload)
-        : RequestWithFileName(user_id, version, op, name_len, std::move(filename)), payload(std::move(payload)){};
+    RequestWithPayload(uint32_t user_id, uint8_t version, Op op, Filename filename, Payload payload)
+        : RequestWithFileName(user_id, version, op, std::move(filename)), payload(std::move(payload)){};
 
   public:
     Payload payload;
@@ -292,12 +335,11 @@ namespace
   struct ResponseWithFileName : public Response
   {
   protected:
-    ResponseWithFileName(uint8_t version, Status status, uint16_t name_len, std::unique_ptr<char[]> filename)
-        : Response(version, status), name_len(name_len), filename(std::move(filename)){};
+    ResponseWithFileName(uint8_t version, Status status, Filename filename)
+        : Response(version, status), filename(std::move(filename)){};
 
   public:
-    uint16_t name_len;
-    std::unique_ptr<char[]> filename;
+    Filename filename;
 
     virtual bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
     {
@@ -306,17 +348,8 @@ namespace
         return false;
       }
 
-      boost::asio::write(socket, boost::asio::buffer(&name_len, sizeof(name_len)), error);
-      if (error)
+      if (!filename.write_to_socket(socket, error))
       {
-        std::cerr << "Failed to write name_len: " << error.message() << '\n';
-        return false;
-      }
-
-      boost::asio::write(socket, boost::asio::buffer(filename.get(), name_len), error);
-      if (error)
-      {
-        std::cerr << "Failed to write filename: " << error.message() << '\n';
         return false;
       }
 
@@ -326,16 +359,15 @@ namespace
     virtual void print(std::ostream &os) const
     {
       Response::print(os);
-      os << "name_len: " << name_len << '\n';
-      os << "filename: " << std::string_view(filename.get(), name_len) << '\n';
+      os << filename << '\n';
     }
   };
 
   struct ResponseWithPayload : public ResponseWithFileName
   {
   protected:
-    ResponseWithPayload(uint8_t version, Status status, uint16_t name_len, std::unique_ptr<char[]> filename, Payload payload)
-        : ResponseWithFileName(version, status, name_len, std::move(filename)), payload(std::move(payload)){};
+    ResponseWithPayload(uint8_t version, Status status, Filename filename, Payload payload)
+        : ResponseWithFileName(version, status, std::move(filename)), payload(std::move(payload)){};
 
   public:
     Payload payload;
@@ -366,26 +398,26 @@ namespace
 
   struct ResponseSuccessRestore final : public ResponseWithPayload
   {
-    ResponseSuccessRestore(uint16_t name_len, std::unique_ptr<char[]> filename, Payload payload)
-        : ResponseWithPayload(maman14::SERVER_VERSION, Status::SUCCESS_RESTORE, name_len, std::move(filename), std::move(payload)){};
+    ResponseSuccessRestore(Filename filename, Payload payload)
+        : ResponseWithPayload(maman14::SERVER_VERSION, Status::SUCCESS_RESTORE, std::move(filename), std::move(payload)){};
   };
 
   struct ResponseSuccessList final : public ResponseWithPayload
   {
-    ResponseSuccessList(uint16_t name_len, std::unique_ptr<char[]> filename, Payload payload)
-        : ResponseWithPayload(maman14::SERVER_VERSION, Status::SUCCESS_LIST, name_len, std::move(filename), std::move(payload)){};
+    ResponseSuccessList(Filename filename, Payload payload)
+        : ResponseWithPayload(maman14::SERVER_VERSION, Status::SUCCESS_LIST, std::move(filename), std::move(payload)){};
   };
 
   struct ResponseSuccessSave final : public ResponseWithFileName
   {
-    ResponseSuccessSave(uint16_t name_len, std::unique_ptr<char[]> filename)
-        : ResponseWithFileName(maman14::SERVER_VERSION, Status::SUCCESS_SAVE, name_len, std::move(filename)){};
+    ResponseSuccessSave(Filename filename)
+        : ResponseWithFileName(maman14::SERVER_VERSION, Status::SUCCESS_SAVE, std::move(filename)){};
   };
 
   struct ResponseErrorNoFile final : public ResponseWithFileName
   {
-    ResponseErrorNoFile(uint16_t name_len, std::unique_ptr<char[]> filename)
-        : ResponseWithFileName(maman14::SERVER_VERSION, Status::ERROR_NO_FILE, name_len, std::move(filename)){};
+    ResponseErrorNoFile(Filename filename)
+        : ResponseWithFileName(maman14::SERVER_VERSION, Status::ERROR_NO_FILE, std::move(filename)){};
   };
 
   struct ResponseErrorNoClient final : public Response
@@ -404,8 +436,8 @@ namespace
 
   struct RequestSave final : public RequestWithPayload
   {
-    RequestSave(uint32_t user_id, uint8_t version, uint16_t name_len, std::unique_ptr<char[]> filename, Payload payload)
-        : RequestWithPayload(user_id, version, Op::SAVE, name_len, std::move(filename), std::move(payload)){};
+    RequestSave(uint32_t user_id, uint8_t version, Filename filename, Payload payload)
+        : RequestWithPayload(user_id, version, Op::SAVE, std::move(filename), std::move(payload)){};
 
     std::unique_ptr<Response> process() override
     {
@@ -426,14 +458,14 @@ namespace
         return std::make_unique<ResponseErrorGeneral>();
       }
 
-      return std::make_unique<ResponseSuccessSave>(name_len, std::move(filename));
+      return std::make_unique<ResponseSuccessSave>(std::move(filename));
     }
   };
 
   struct RequestRestore final : public RequestWithFileName
   {
-    RequestRestore(uint32_t user_id, uint8_t version, uint16_t name_len, std::unique_ptr<char[]> filename)
-        : RequestWithFileName(user_id, version, Op::RESTORE, name_len, std::move(filename)){};
+    RequestRestore(uint32_t user_id, uint8_t version, Filename filename)
+        : RequestWithFileName(user_id, version, Op::RESTORE, std::move(filename)){};
 
     std::unique_ptr<Response> process() override
     {
@@ -458,14 +490,14 @@ namespace
         return std::make_unique<ResponseErrorGeneral>();
       }
 
-      return std::make_unique<ResponseSuccessRestore>(name_len, std::move(filename), std::move(payload));
+      return std::make_unique<ResponseSuccessRestore>(std::move(filename), std::move(payload));
     }
   };
 
   struct RequestDelete final : public RequestWithFileName
   {
-    RequestDelete(uint32_t user_id, uint8_t version, uint16_t name_len, std::unique_ptr<char[]> filename)
-        : RequestWithFileName(user_id, version, Op::DELETE, name_len, std::move(filename)){};
+    RequestDelete(uint32_t user_id, uint8_t version, Filename filename)
+        : RequestWithFileName(user_id, version, Op::DELETE, std::move(filename)){};
 
     std::unique_ptr<Response> process() override
     {
@@ -477,7 +509,7 @@ namespace
         return std::make_unique<ResponseErrorGeneral>();
       }
 
-      return std::make_unique<ResponseSuccessSave>(name_len, std::move(filename));
+      return std::make_unique<ResponseSuccessSave>(std::move(filename));
     }
   };
 
@@ -543,7 +575,7 @@ namespace
       std::move(list_file_name.begin(), list_file_name.end(), filename.get()); // TODO: check null termination
       auto content = std::make_unique<uint8_t[]>(static_cast<uint32_t>(file_size));
       std::move(file_content.begin(), file_content.end(), content.get());
-      return std::make_unique<ResponseSuccessList>(file_name_length, std::move(filename), Payload{static_cast<uint32_t>(file_size), std::move(content)});
+      return std::make_unique<ResponseSuccessList>(Filename{file_name_length, std::move(filename)}, Payload{static_cast<uint32_t>(file_size), std::move(content)});
     }
   };
 #pragma pack(pop)
@@ -568,21 +600,19 @@ namespace
     }
     if (op == Op::RESTORE || op == Op::DELETE || op == Op::SAVE)
     {
-      auto name_len_and_filename = RequestWithFileName::read_name_len_and_filename(socket, error);
-      if (!name_len_and_filename)
+      auto filename = RequestWithFileName::read_name_len_and_filename(socket, error);
+      if (!filename)
       {
         return {};
       }
 
-      auto &[name_len, filename] = *name_len_and_filename;
-
       if (op == Op::RESTORE)
       {
-        return std::make_unique<RequestRestore>(user_id, version, name_len, std::move(filename));
+        return std::make_unique<RequestRestore>(user_id, version, std::move(filename.value()));
       }
       else if (op == Op::DELETE)
       {
-        return std::make_unique<RequestDelete>(user_id, version, name_len, std::move(filename));
+        return std::make_unique<RequestDelete>(user_id, version, std::move(filename.value()));
       }
       else
       {
@@ -592,7 +622,7 @@ namespace
           return {};
         }
 
-        return std::make_unique<RequestSave>(user_id, version, name_len, std::move(filename), std::move(payload.value()));
+        return std::make_unique<RequestSave>(user_id, version, std::move(filename.value()), std::move(payload.value()));
       }
     }
 
