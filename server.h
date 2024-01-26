@@ -362,7 +362,7 @@ namespace
   public:
     Payload payload;
 
-    virtual bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+    bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
     {
       if (!ResponseWithFileName::write_to_socket(socket, error))
       {
@@ -377,7 +377,7 @@ namespace
       return true;
     };
 
-    virtual void print(std::ostream &os) const
+    void print(std::ostream &os) const
     {
       ResponseWithFileName::print(os);
       os << payload << '\n';
