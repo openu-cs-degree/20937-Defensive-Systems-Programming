@@ -68,6 +68,12 @@ namespace
     Payload(uint32_t size, std::unique_ptr<uint8_t[]> content)
         : size(size), content(std::move(content)){};
 
+    Payload(const std::string &content)
+        : size(static_cast<uint32_t>(content.size())), content(std::make_unique<uint8_t[]>(size))
+    {
+      std::copy(content.begin(), content.end(), this->content.get());
+    }
+
     bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
     {
       boost::asio::write(socket, boost::asio::buffer(&size, sizeof(size)), error);
@@ -551,20 +557,13 @@ namespace
       const auto user_file_name = generate_random_file_name();
       std::filesystem::path user_file_path = user_dir_path / user_file_name;
 
-      auto optional_file = create_and_get_user_file(user_file_path);
-      if (!optional_file)
-      {
-        return std::make_unique<ResponseErrorGeneral>();
-      }
-      auto &file = *optional_file;
-
-      auto file_size = write_directory_to_file(user_dir_path, user_file_name, file);
-      if (!file_size)
+      auto file = create_and_get_user_file(user_file_path);
+      if (!file)
       {
         return std::make_unique<ResponseErrorGeneral>();
       }
 
-      auto payload = Payload::read_from_file(user_file_path);
+      auto payload = write_directory_to_file(user_dir_path, user_file_name, file.value());
       if (!payload)
       {
         return std::make_unique<ResponseErrorGeneral>();
@@ -599,26 +598,29 @@ namespace
       return file;
     }
 
-    std::optional<uint32_t> write_directory_to_file(const std::filesystem::path &src_path, const std::string_view &ignored_filename, std::fstream &dst_file)
+    std::optional<Payload> write_directory_to_file(const std::filesystem::path &src_path, const std::string_view &ignored_filename, std::fstream &dst_file)
     {
+      std::ostringstream oss;
       std::for_each(std::filesystem::directory_iterator(src_path),
                     std::filesystem::directory_iterator(),
                     [&](const auto &entry)
                     {
                       if (auto filename = entry.path().filename(); filename != ignored_filename)
                       {
-                        dst_file << filename << '\n';
+                        oss << filename << '\n';
                       }
                     });
 
-      auto file_size = dst_file.tellp();
-      if (file_size > std::numeric_limits<uint32_t>::max())
+      std::string content = oss.str();
+      if (auto file_size = content.size(); file_size > std::numeric_limits<uint32_t>::max())
       {
         std::cerr << "File size is too big: " << file_size << '\n';
         return std::nullopt;
       }
 
-      return static_cast<uint32_t>(file_size);
+      dst_file << content;
+
+      return Payload{content};
     }
   };
 #pragma pack(pop)
