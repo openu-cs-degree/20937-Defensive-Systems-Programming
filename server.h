@@ -708,12 +708,12 @@ namespace maman14
   {
     using boost::asio::ip::tcp;
 
-    boost::asio::io_context io_context;
-    tcp::socket socket(io_context);
-    tcp::acceptor acceptor(io_context, tcp::endpoint(tcp::v4(), port));
-
     try
     {
+      boost::asio::io_context io_context;
+      tcp::socket socket(io_context);
+      tcp::acceptor acceptor(io_context, tcp::endpoint(tcp::v4(), port));
+
       while (true)
       {
         acceptor.accept(socket);
