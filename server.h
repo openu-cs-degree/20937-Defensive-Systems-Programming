@@ -54,9 +54,9 @@ namespace
 {
 #pragma pack(push, 1)
 
-  // structs to be used by both Request and Response
+  // classes to be used by both Request and Response
 
-  struct Payload
+  class Payload
   {
     uint32_t size;
     std::unique_ptr<uint8_t[]> content;
@@ -159,11 +159,12 @@ namespace
     }
   };
 
-  struct Filename
+  class Filename
   {
     uint16_t name_len;
     std::unique_ptr<char[]> filename;
 
+  public:
     Filename(uint16_t name_len, std::unique_ptr<char[]> filename)
         : name_len(name_len), filename(std::move(filename)) {}
 
@@ -220,23 +221,23 @@ namespace
     }
   };
 
-  // forward declare Response so that it can be used in Request's process()
+  // forward declare Response so that it can be used in Request::process()
 
-  struct Response;
+  class Response;
 
   // Requests base classes
 
-  struct Request
+  class Request
   {
   protected:
-    Request(uint32_t user_id, uint8_t version, Op op)
-        : user_id(user_id), version(version), op(op){};
-
-  public:
     uint32_t user_id;
     uint8_t version;
     Op op;
 
+    Request(uint32_t user_id, uint8_t version, Op op)
+        : user_id(user_id), version(version), op(op){};
+
+  public:
     virtual ~Request() = default;
 
     static std::optional<std::tuple<uint32_t, uint8_t, Op>> read_user_id_and_version_and_op(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
@@ -268,7 +269,7 @@ namespace
     std::filesystem::path create_and_get_user_dir_path() const
     {
       std::filesystem::path dir_path = std::filesystem::path("C:\\") / maman14::SERVER_DIR_NAME / std::to_string(user_id);
-      std::filesystem::create_directories(dir_path);
+      std::filesystem::create_directories(dir_path); // TODO: check return value (and return bool?)
       return dir_path;
     }
 
@@ -288,15 +289,15 @@ namespace
     }
   };
 
-  struct RequestWithFileName : public Request
+  class RequestWithFileName : public Request
   {
   protected:
+    Filename filename;
+
     RequestWithFileName(uint32_t user_id, uint8_t version, Op op, Filename filename)
         : Request(user_id, version, op), filename(std::move(filename)){};
 
   public:
-    Filename filename;
-
     virtual ~RequestWithFileName() = default;
 
     std::filesystem::path create_and_get_user_file_path() const
@@ -312,15 +313,15 @@ namespace
     }
   };
 
-  struct RequestWithPayload : public RequestWithFileName
+  class RequestWithPayload : public RequestWithFileName
   {
   protected:
+    Payload payload;
+
     RequestWithPayload(uint32_t user_id, uint8_t version, Op op, Filename filename, Payload payload)
         : RequestWithFileName(user_id, version, op, std::move(filename)), payload(std::move(payload)){};
 
   public:
-    Payload payload;
-
     void print(std::ostream &os) const
     {
       RequestWithFileName::print(os);
@@ -330,16 +331,16 @@ namespace
 
   // Response base classes
 
-  struct Response
+  class Response
   {
   protected:
+    uint8_t version;
+    Status status;
+
     Response(uint8_t version, Status status)
         : version(version), status(status){};
 
   public:
-    uint8_t version;
-    Status status;
-
     virtual bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
     {
       boost::asio::write(socket, boost::asio::buffer(&this->version, sizeof(version) + sizeof(status)), error);
@@ -365,15 +366,15 @@ namespace
     }
   };
 
-  struct ResponseWithFileName : public Response
+  class ResponseWithFileName : public Response
   {
   protected:
+    Filename filename;
+
     ResponseWithFileName(uint8_t version, Status status, Filename filename)
         : Response(version, status), filename(std::move(filename)){};
 
   public:
-    Filename filename;
-
     virtual bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
     {
       if (!Response::write_to_socket(socket, error))
@@ -396,15 +397,15 @@ namespace
     }
   };
 
-  struct ResponseWithPayload : public ResponseWithFileName
+  class ResponseWithPayload : public ResponseWithFileName
   {
   protected:
+    Payload payload;
+
     ResponseWithPayload(uint8_t version, Status status, Filename filename, Payload payload)
         : ResponseWithFileName(version, status, std::move(filename)), payload(std::move(payload)){};
 
   public:
-    Payload payload;
-
     bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
     {
       if (!ResponseWithFileName::write_to_socket(socket, error))
@@ -427,48 +428,55 @@ namespace
     }
   };
 
-  // Response concrete structs (final, non-abstract)
+  // Response concrete classes (final, non-abstract)
 
-  struct ResponseSuccessRestore final : public ResponseWithPayload
+  class ResponseSuccessRestore final : public ResponseWithPayload
   {
+  public:
     ResponseSuccessRestore(Filename filename, Payload payload)
         : ResponseWithPayload(maman14::SERVER_VERSION, Status::SUCCESS_RESTORE, std::move(filename), std::move(payload)){};
   };
 
-  struct ResponseSuccessList final : public ResponseWithPayload
+  class ResponseSuccessList final : public ResponseWithPayload
   {
+  public:
     ResponseSuccessList(Filename filename, Payload payload)
         : ResponseWithPayload(maman14::SERVER_VERSION, Status::SUCCESS_LIST, std::move(filename), std::move(payload)){};
   };
 
-  struct ResponseSuccessSave final : public ResponseWithFileName
+  class ResponseSuccessSave final : public ResponseWithFileName
   {
+  public:
     ResponseSuccessSave(Filename filename)
         : ResponseWithFileName(maman14::SERVER_VERSION, Status::SUCCESS_SAVE, std::move(filename)){};
   };
 
-  struct ResponseErrorNoFile final : public ResponseWithFileName
+  class ResponseErrorNoFile final : public ResponseWithFileName
   {
+  public:
     ResponseErrorNoFile(Filename filename)
         : ResponseWithFileName(maman14::SERVER_VERSION, Status::ERROR_NO_FILE, std::move(filename)){};
   };
 
-  struct ResponseErrorNoClient final : public Response
+  class ResponseErrorNoClient final : public Response
   {
+  public:
     ResponseErrorNoClient()
         : Response(maman14::SERVER_VERSION, Status::ERROR_NO_CLIENT){};
   };
 
-  struct ResponseErrorGeneral final : public Response
+  class ResponseErrorGeneral final : public Response
   {
+  public:
     ResponseErrorGeneral()
         : Response(maman14::SERVER_VERSION, Status::ERROR_GENERAL){};
   };
 
-  // Request concrete structs (final, non-abstract)
+  // Request concrete classs (final, non-abstract)
 
-  struct RequestSave final : public RequestWithPayload
+  class RequestSave final : public RequestWithPayload
   {
+  public:
     RequestSave(uint32_t user_id, uint8_t version, Filename filename, Payload payload)
         : RequestWithPayload(user_id, version, Op::SAVE, std::move(filename), std::move(payload)){};
 
@@ -485,8 +493,9 @@ namespace
     }
   };
 
-  struct RequestRestore final : public RequestWithFileName
+  class RequestRestore final : public RequestWithFileName
   {
+  public:
     RequestRestore(uint32_t user_id, uint8_t version, Filename filename)
         : RequestWithFileName(user_id, version, Op::RESTORE, std::move(filename)){};
 
@@ -504,8 +513,9 @@ namespace
     }
   };
 
-  struct RequestDelete final : public RequestWithFileName
+  class RequestDelete final : public RequestWithFileName
   {
+  public:
     RequestDelete(uint32_t user_id, uint8_t version, Filename filename)
         : RequestWithFileName(user_id, version, Op::DELETE, std::move(filename)){};
 
@@ -523,8 +533,9 @@ namespace
     }
   };
 
-  struct RequestList final : public Request
+  class RequestList final : public Request
   {
+  public:
     RequestList(uint32_t user_id, uint8_t version)
         : Request(user_id, version, Op::LIST){};
 
