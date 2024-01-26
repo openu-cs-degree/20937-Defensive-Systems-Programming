@@ -674,6 +674,21 @@ namespace
     return {};
   }
 
+  bool clear_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+  {
+    boost::asio::streambuf discard_buffer;
+    while (socket.available())
+    {
+      socket.read_some(discard_buffer.prepare(socket.available()), error);
+      discard_buffer.commit(socket.available());
+      if (error)
+      {
+        return false;
+      }
+    }
+    return true;
+  }
+
   void handle_client(boost::asio::ip::tcp::socket socket)
   {
     boost::system::error_code error;
@@ -686,6 +701,16 @@ namespace
       return;
     }
     std::cout << *request << '\n';
+
+    if (socket.available())
+    {
+      std::cout << "Socket had redundant data. Discarding it.\n";
+      if (!clear_socket(socket, error))
+      {
+        std::cout << "Failed to discard extra data: " << error.message() << '\n';
+        return;
+      }
+    }
 
     std::cout << "Generating response:\n";
     auto response = request->process();
