@@ -876,3 +876,5 @@ namespace maman14
   }
 
 } // namespace maman14
+
+#define DELETE (0x00010000L)
