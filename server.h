@@ -15,28 +15,26 @@
 
 #undef DELETE // the DELETE macro collides with Op::DELETE definition
 
-#define DEBUG
+#define DEBUG // TODO: delete
 
+#ifdef DEBUG
 namespace
 {
   template <typename T>
-  void print_args(std::ostream &os, const T &t)
+  void log(const T &t)
   {
-    os << t << std::endl;
+    std::cerr << t << std::endl;
   }
 
   template <typename T, typename... Args>
-  void print_args(std::ostream &os, const T &t, const Args &...args)
+  void log(const T &t, const Args &...args)
   {
-    os << t;
-    print_args(os, args...);
+    std::cerr << t;
+    log(args...);
   }
 } // anonymous namespace
-
-#ifdef DEBUG
-#define LOG(...) print_args(std::cerr, __VA_ARGS__)
 #else
-#define LOG(...) (void)0
+#define log(_x, ...) (void)0
 #endif
 
 #define SOCKET_IO(operation, pointer, size, error_value, ...)                                  \
@@ -45,7 +43,7 @@ namespace
     if (auto bytes_transferred = operation(socket, boost::asio::buffer(pointer, size), error); \
         error || bytes_transferred != size)                                                    \
     {                                                                                          \
-      LOG(__VA_ARGS__);                                                                        \
+      log(__VA_ARGS__);                                                                        \
       return error_value;                                                                      \
     }                                                                                          \
   } while (0)
@@ -134,14 +132,14 @@ namespace
       std::ofstream file(file_path, std::ios::binary | std::ios::trunc);
       if (!file)
       {
-        LOG("Failed to open file: ", file_path);
+        log("Failed to open file: ", file_path);
         return false;
       }
 
       file.write(reinterpret_cast<const char *>(content.get()), size);
       if (!file)
       {
-        LOG("Failed to write to file: ", file_path);
+        log("Failed to write to file: ", file_path);
         return false;
       }
 
@@ -166,7 +164,7 @@ namespace
       std::ifstream file(file_path, std::ios::binary | std::ios::ate);
       if (!file)
       {
-        LOG("Failed to open file: ", file_path);
+        log("Failed to open file: ", file_path);
         return {};
       }
 
@@ -175,7 +173,7 @@ namespace
 
       if (size > std::numeric_limits<uint32_t>::max())
       {
-        LOG("File size is too big: ", size);
+        log("File size is too big: ", size);
         return {};
       }
 
@@ -183,7 +181,7 @@ namespace
       file.read(reinterpret_cast<char *>(content.get()), size);
       if (!file)
       {
-        LOG("Failed to read file: ", file_path);
+        log("Failed to read file: ", file_path);
         return {};
       }
 
@@ -251,7 +249,7 @@ namespace
 
       if (!filename.is_filename_valid())
       {
-        LOG("Invalid filename: ", filename.get_name());
+        log("Invalid filename: ", filename.get_name());
         return std::nullopt;
       }
 
@@ -311,7 +309,7 @@ namespace
 
       if (!is_valid_op(static_cast<uint8_t>(data.op)))
       {
-        LOG("Invalid op: ", static_cast<uint16_t>(data.op));
+        log("Invalid op: ", static_cast<uint16_t>(data.op));
         return std::nullopt;
       }
 
@@ -625,7 +623,7 @@ namespace
 
       if (std::error_code ec; !std::filesystem::remove(file_path, ec))
       {
-        LOG("Failed to delete file: ", file_path);
+        log("Failed to delete file: ", file_path);
         return std::make_unique<ResponseErrorGeneral>();
       }
 
@@ -684,7 +682,7 @@ namespace
       std::fstream file(file_path, std::ios::in | std::ios::out | std::ios::trunc);
       if (!file)
       {
-        LOG("Failed to create file: ", file_path);
+        log("Failed to create file: ", file_path);
         return std::nullopt;
       }
 
@@ -707,7 +705,7 @@ namespace
       std::string content = oss.str();
       if (auto file_size = content.size(); file_size > std::numeric_limits<uint32_t>::max())
       {
-        LOG("File size is too big: ", file_size);
+        log("File size is too big: ", file_size);
         return std::nullopt;
       }
 
@@ -786,41 +784,41 @@ namespace
   {
     boost::system::error_code error;
 
-    LOG("Receiving request :)");
+    log("Receiving request :)");
     auto request = read_request(socket, error);
     if (!request)
     {
-      LOG("Request reading failed!");
+      log("Request reading failed!");
       return;
     }
-    LOG(*request);
+    log(*request);
 
     if (socket.available())
     {
-      LOG("Socket had redundant data. Discarding it.");
+      log("Socket had redundant data. Discarding it.");
       if (!clear_socket(socket, error))
       {
-        LOG("Failed to discard extra data: ", error.message());
+        log("Failed to discard extra data: ", error.message());
         return;
       }
     }
 
-    LOG("Request received. Generating response:");
+    log("Request received. Generating response:");
     auto response = request->process();
     if (!response)
     {
-      LOG("Request processing failed!");
+      log("Request processing failed!");
       return;
     }
-    LOG(*response);
+    log(*response);
 
-    LOG("Sending response:");
+    log("Sending response:");
     if (!response->write_to_socket(socket, error))
     {
-      LOG("Failed to send response: ", error.message());
+      log("Failed to send response: ", error.message());
       return;
     }
-    LOG("Response sent successfully :D");
+    log("Response sent successfully :D");
   }
 } // anonymous namespace
 
@@ -843,9 +841,9 @@ namespace maman14
         std::thread(handle_client, std::move(socket)).detach();
       }
     }
-    catch (std::exception &e)
+    catch ([[maybe_unused]] std::exception &e)
     {
-      LOG("Terminating server because of the following exception: ", e.what());
+      log("Terminating server because of the following exception: ", e.what());
     }
   }
 
@@ -853,7 +851,9 @@ namespace maman14
 
 #define DELETE (0x00010000L)
 
-#undef LOG
+#ifndef DEBUG
+#undef log
+#endif
 #undef SOCKET_IO
 #undef SOCKET_WRITE
 #undef SOCKET_READ
