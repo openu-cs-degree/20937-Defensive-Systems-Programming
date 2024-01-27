@@ -850,3 +850,9 @@ namespace maman14
 } // namespace maman14
 
 #define DELETE (0x00010000L)
+
+#undef DEBUG_COUT
+#undef DEBUG_CERR
+#undef SOCKET_IO
+#undef SOCKET_WRITE
+#undef SOCKET_READ
