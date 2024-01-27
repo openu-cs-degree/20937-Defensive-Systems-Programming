@@ -22,11 +22,11 @@ namespace
   template <typename T>
   void print_args(std::ostream &os, const T &t)
   {
-    os << t;
+    os << t << std::endl;
   }
 
   template <typename T, typename... Args>
-  void print_args(std::ostream &os, const T &t, Args... args)
+  void print_args(std::ostream &os, const T &t, const Args &...args)
   {
     os << t;
     print_args(os, args...);
@@ -34,7 +34,7 @@ namespace
 } // anonymous namespace
 
 #ifdef DEBUG
-#define LOG(...) print_args(std::cerr, __VA_ARGS__, '\n')
+#define LOG(...) print_args(std::cerr, __VA_ARGS__)
 #else
 #define LOG(...) (void)0
 #endif
