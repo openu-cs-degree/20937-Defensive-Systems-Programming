@@ -50,6 +50,23 @@ namespace
 #define DEBUG_CERR(...) (void)0
 #endif
 
+#define SOCKET_IO(operation, pointer, size, error_value, ...)                                  \
+  do                                                                                           \
+  {                                                                                            \
+    if (auto bytes_transferred = operation(socket, boost::asio::buffer(pointer, size), error); \
+        error || bytes_transferred != size)                                                    \
+    {                                                                                          \
+      DEBUG_CERR(__VA_ARGS__);                                                                 \
+      return error_value;                                                                      \
+    }                                                                                          \
+  } while (0)
+
+#define SOCKET_WRITE(pointer, size, error_value, ...) \
+  SOCKET_IO(boost::asio::write, pointer, size, error_value, __VA_ARGS__)
+
+#define SOCKET_READ(pointer, size, error_value, ...) \
+  SOCKET_IO(boost::asio::read, pointer, size, error_value, __VA_ARGS__)
+
 namespace maman14
 {
   static constexpr inline uint8_t SERVER_VERSION = 3;
@@ -116,19 +133,9 @@ namespace
 
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
-      boost::asio::write(socket, boost::asio::buffer(&size, sizeof(size)), error);
-      if (error)
-      {
-        DEBUG_CERR("Failed to write payload size: ", error.message());
-        return false;
-      }
+      SOCKET_WRITE(&size, sizeof(size), false, "Failed to write payload size: ", error.message());
 
-      boost::asio::write(socket, boost::asio::buffer(content.get(), size), error);
-      if (error)
-      {
-        DEBUG_CERR("Failed to write payload content: ", error.message());
-        return false;
-      }
+      SOCKET_WRITE(content.get(), size, false, "Failed to write payload content: ", error.message());
 
       return true;
     };
@@ -155,19 +162,12 @@ namespace
     static const std::optional<Payload> read_from_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
     {
       Payload payload;
-      boost::asio::read(socket, boost::asio::buffer(&payload.size, sizeof(payload.size)), error);
-      if (error)
-      {
-        DEBUG_CERR("Failed to read payload size: ", error.message());
-        return {};
-      }
+
+      SOCKET_READ(&payload.size, sizeof(payload.size), {}, "Failed to read payload size: ", error.message());
+
       payload.content = std::make_unique<uint8_t[]>(payload.size);
-      boost::asio::read(socket, boost::asio::buffer(payload.content.get(), payload.size), error);
-      if (error)
-      {
-        DEBUG_CERR("Failed to read payload content: ", error.message());
-        return {};
-      }
+
+      SOCKET_READ(payload.content.get(), payload.size, {}, "Failed to read payload content: ", error.message());
 
       return payload;
     };
@@ -243,19 +243,9 @@ namespace
 
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
-      boost::asio::write(socket, boost::asio::buffer(&name_len, sizeof(name_len)), error);
-      if (error)
-      {
-        DEBUG_CERR("Failed to write name_len: ", error.message());
-        return false;
-      }
+      SOCKET_WRITE(&name_len, sizeof(name_len), false, "Failed to write name_len: ", error.message());
 
-      boost::asio::write(socket, boost::asio::buffer(filename.get(), name_len), error);
-      if (error)
-      {
-        DEBUG_CERR("Failed to write filename: ", error.message());
-        return false;
-      }
+      SOCKET_WRITE(filename.get(), name_len, false, "Failed to write filename: ", error.message());
 
       return true;
     }
@@ -263,20 +253,12 @@ namespace
     static const std::optional<Filename> read_from_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
     {
       Filename filename;
-      boost::asio::read(socket, boost::asio::buffer(&filename.name_len, sizeof(filename.name_len)), error);
-      if (error)
-      {
-        DEBUG_CERR("Failed to read name_len: ", error.message());
-        return {};
-      }
+
+      SOCKET_READ(&filename.name_len, sizeof(filename.name_len), {}, "Failed to read name_len: ", error.message());
 
       filename.filename = std::make_unique<char[]>(filename.name_len);
-      boost::asio::read(socket, boost::asio::buffer(filename.filename.get(), filename.name_len), error);
-      if (error)
-      {
-        DEBUG_CERR("Failed to read filename: ", error.message());
-        return {};
-      }
+
+      SOCKET_READ(filename.filename.get(), filename.name_len, {}, "Failed to read filename: ", error.message());
 
       return filename;
     }
@@ -323,12 +305,7 @@ namespace
       };
       RequestData data;
 
-      boost::asio::read(socket, boost::asio::buffer(&data, sizeof(data)), error);
-      if (error)
-      {
-        DEBUG_CERR("Failed to read request: ", error.message());
-        return std::nullopt;
-      }
+      SOCKET_READ(&data, sizeof(data), std::nullopt, "Failed to read request: ", error.message());
 
       if (!is_valid_op(static_cast<uint8_t>(data.op)))
       {
@@ -432,12 +409,7 @@ namespace
 
     virtual const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
-      boost::asio::write(socket, boost::asio::buffer(&this->version, sizeof(version) + sizeof(status)), error);
-      if (error)
-      {
-        DEBUG_CERR("Failed to write response: ", error.message());
-        return false;
-      }
+      SOCKET_WRITE(&this->version, sizeof(version) + sizeof(status), false, "Failed to write response: ", error.message());
 
       return true;
     }
