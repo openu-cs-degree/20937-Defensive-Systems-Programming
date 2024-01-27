@@ -34,20 +34,13 @@ namespace
 } // anonymous namespace
 
 #ifdef DEBUG
-#define DEBUG_COUT(...)                       \
-  do                                          \
-  {                                           \
-    print_args(std::cout, __VA_ARGS__, '\n'); \
-  } while (0)
-
-#define DEBUG_CERR(...)                       \
+#define LOG(...)                              \
   do                                          \
   {                                           \
     print_args(std::cerr, __VA_ARGS__, '\n'); \
   } while (0)
 #else
-#define DEBUG_COUT(...) (void)0
-#define DEBUG_CERR(...) (void)0
+#define LOG(...) (void)0
 #endif
 
 #define SOCKET_IO(operation, pointer, size, error_value, ...)                                  \
@@ -56,7 +49,7 @@ namespace
     if (auto bytes_transferred = operation(socket, boost::asio::buffer(pointer, size), error); \
         error || bytes_transferred != size)                                                    \
     {                                                                                          \
-      DEBUG_CERR(__VA_ARGS__);                                                                 \
+      LOG(__VA_ARGS__);                                                                        \
       return error_value;                                                                      \
     }                                                                                          \
   } while (0)
@@ -145,14 +138,14 @@ namespace
       std::ofstream file(file_path, std::ios::binary | std::ios::trunc);
       if (!file)
       {
-        DEBUG_CERR("Failed to open file: ", file_path);
+        LOG("Failed to open file: ", file_path);
         return false;
       }
 
       file.write(reinterpret_cast<const char *>(content.get()), size);
       if (!file)
       {
-        DEBUG_CERR("Failed to write to file: ", file_path);
+        LOG("Failed to write to file: ", file_path);
         return false;
       }
 
@@ -177,7 +170,7 @@ namespace
       std::ifstream file(file_path, std::ios::binary | std::ios::ate);
       if (!file)
       {
-        DEBUG_CERR("Failed to open file: ", file_path);
+        LOG("Failed to open file: ", file_path);
         return {};
       }
 
@@ -186,7 +179,7 @@ namespace
 
       if (size > std::numeric_limits<uint32_t>::max())
       {
-        DEBUG_CERR("File size is too big: ", size);
+        LOG("File size is too big: ", size);
         return {};
       }
 
@@ -194,7 +187,7 @@ namespace
       file.read(reinterpret_cast<char *>(content.get()), size);
       if (!file)
       {
-        DEBUG_CERR("Failed to read file: ", file_path);
+        LOG("Failed to read file: ", file_path);
         return {};
       }
 
@@ -262,7 +255,7 @@ namespace
 
       if (!filename.is_filename_valid())
       {
-        DEBUG_CERR("Invalid filename: ", filename.get_name());
+        LOG("Invalid filename: ", filename.get_name());
         return std::nullopt;
       }
 
@@ -322,7 +315,7 @@ namespace
 
       if (!is_valid_op(static_cast<uint8_t>(data.op)))
       {
-        DEBUG_CERR("Invalid op: ", static_cast<uint16_t>(data.op));
+        LOG("Invalid op: ", static_cast<uint16_t>(data.op));
         return std::nullopt;
       }
 
@@ -636,7 +629,7 @@ namespace
 
       if (std::error_code ec; !std::filesystem::remove(file_path, ec))
       {
-        DEBUG_CERR("Failed to delete file: ", file_path);
+        LOG("Failed to delete file: ", file_path);
         return std::make_unique<ResponseErrorGeneral>();
       }
 
@@ -695,7 +688,7 @@ namespace
       std::fstream file(file_path, std::ios::in | std::ios::out | std::ios::trunc);
       if (!file)
       {
-        DEBUG_CERR("Failed to create file: ", file_path);
+        LOG("Failed to create file: ", file_path);
         return std::nullopt;
       }
 
@@ -718,7 +711,7 @@ namespace
       std::string content = oss.str();
       if (auto file_size = content.size(); file_size > std::numeric_limits<uint32_t>::max())
       {
-        DEBUG_CERR("File size is too big: ", file_size);
+        LOG("File size is too big: ", file_size);
         return std::nullopt;
       }
 
@@ -797,41 +790,41 @@ namespace
   {
     boost::system::error_code error;
 
-    DEBUG_COUT("Receiving request :)");
+    LOG("Receiving request :)");
     auto request = read_request(socket, error);
     if (!request)
     {
-      DEBUG_COUT("Request reading failed!");
+      LOG("Request reading failed!");
       return;
     }
-    DEBUG_COUT(*request);
+    LOG(*request);
 
     if (socket.available())
     {
-      DEBUG_COUT("Socket had redundant data. Discarding it.");
+      LOG("Socket had redundant data. Discarding it.");
       if (!clear_socket(socket, error))
       {
-        DEBUG_COUT("Failed to discard extra data: ", error.message());
+        LOG("Failed to discard extra data: ", error.message());
         return;
       }
     }
 
-    DEBUG_COUT("Request received. Generating response:");
+    LOG("Request received. Generating response:");
     auto response = request->process();
     if (!response)
     {
-      DEBUG_COUT("Request processing failed!");
+      LOG("Request processing failed!");
       return;
     }
-    DEBUG_COUT(*response);
+    LOG(*response);
 
-    DEBUG_COUT("Sending response:");
+    LOG("Sending response:");
     if (!response->write_to_socket(socket, error))
     {
-      DEBUG_COUT("Failed to send response: ", error.message());
+      LOG("Failed to send response: ", error.message());
       return;
     }
-    DEBUG_COUT("Response sent successfully :D");
+    LOG("Response sent successfully :D");
   }
 } // anonymous namespace
 
@@ -856,7 +849,7 @@ namespace maman14
     }
     catch (std::exception &e)
     {
-      DEBUG_CERR("Terminating server because of the following exception: ", e.what());
+      LOG("Terminating server because of the following exception: ", e.what());
     }
   }
 
@@ -864,8 +857,7 @@ namespace maman14
 
 #define DELETE (0x00010000L)
 
-#undef DEBUG_COUT
-#undef DEBUG_CERR
+#undef LOG
 #undef SOCKET_IO
 #undef SOCKET_WRITE
 #undef SOCKET_READ
