@@ -34,11 +34,7 @@ namespace
 } // anonymous namespace
 
 #ifdef DEBUG
-#define LOG(...)                              \
-  do                                          \
-  {                                           \
-    print_args(std::cerr, __VA_ARGS__, '\n'); \
-  } while (0)
+#define LOG(...) print_args(std::cerr, __VA_ARGS__, '\n')
 #else
 #define LOG(...) (void)0
 #endif
