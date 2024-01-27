@@ -54,7 +54,7 @@ namespace
 
 namespace maman14
 {
-  static constexpr inline uint8_t server_version = 3;
+  static constexpr inline uint8_t server_version = 4;
   static constexpr inline std::string_view server_dir_name = "my_server";
 } // namespace maman14
 
@@ -188,10 +188,10 @@ namespace
 
     friend std::ostream &operator<<(std::ostream &os, const Payload &payload)
     {
-      static constexpr uint32_t MAX_PAYLOAD_PRINT_SIZE = 420;
+      static constexpr uint32_t MAX_PAYLOAD_PRINT_SIZE = 69;
 
       os << "payload size: " << payload.size << '\n';
-      os << (payload.size > MAX_PAYLOAD_PRINT_SIZE ? "payload (printing limited to 420 bytes):\n" : "payload:\n")
+      os << (payload.size > MAX_PAYLOAD_PRINT_SIZE ? "payload (printing limited to 69 bytes):\n" : "payload:\n")
          << std::string_view(reinterpret_cast<const char *>(payload.content.get()), std::min(payload.size, MAX_PAYLOAD_PRINT_SIZE)) << '\n';
 
       return os;
