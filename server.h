@@ -346,7 +346,7 @@ namespace
       return user_dir_path / filename.get_name();
     }
 
-    virtual void print(std::ostream &os) const
+    virtual void print(std::ostream &os) const override
     {
       Request::print(os);
       os << filename << '\n';
@@ -369,7 +369,7 @@ namespace
 
     virtual ~RequestWithPayload() = default;
 
-    void print(std::ostream &os) const
+    void print(std::ostream &os) const override
     {
       RequestWithFileName::print(os);
       os << payload << '\n';
@@ -436,7 +436,7 @@ namespace
 
     virtual ~ResponseWithFileName() = default;
 
-    virtual const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
+    virtual const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const override
     {
       if (!Response::write_to_socket(socket, error))
       {
@@ -451,7 +451,7 @@ namespace
       return true;
     }
 
-    virtual void print(std::ostream &os) const
+    virtual void print(std::ostream &os) const override
     {
       Response::print(os);
       os << filename << '\n';
@@ -474,7 +474,7 @@ namespace
 
     virtual ~ResponseWithPayload() = default;
 
-    const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
+    const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const override
     {
       if (!ResponseWithFileName::write_to_socket(socket, error))
       {
@@ -489,7 +489,7 @@ namespace
       return true;
     };
 
-    void print(std::ostream &os) const
+    void print(std::ostream &os) const override
     {
       ResponseWithFileName::print(os);
       os << payload << '\n';
