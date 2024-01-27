@@ -13,8 +13,6 @@
 #include <boost/asio.hpp>
 #pragma warning(pop)
 
-#undef DELETE // the DELETE macro collides with Op::DELETE definition
-
 #define DEBUG // TODO: delete
 
 #ifdef DEBUG
@@ -56,36 +54,36 @@ namespace
 
 namespace maman14
 {
-  static constexpr inline uint8_t SERVER_VERSION = 3;
-  static constexpr inline std::string_view SERVER_DIR_NAME = "my_server";
+  static constexpr inline uint8_t server_version = 3;
+  static constexpr inline std::string_view server_dir_name = "my_server";
 } // namespace maman14
 
 namespace
 {
   enum class Op : uint8_t
   {
-    SAVE = 100,
-    RESTORE = 200, // no size or payload
-    DELETE = 201,  // no size or payload
-    LIST = 202,    // no size, payload, name_len or filename
+    save = 100,
+    restore = 200, // no size or payload
+    remove = 201,  // no size or payload
+    list = 202,    // no size, payload, name_len or filename
   };
 
   const inline bool is_valid_op(uint8_t value)
   {
-    return value == static_cast<uint8_t>(Op::SAVE) ||
-           value == static_cast<uint8_t>(Op::RESTORE) ||
-           value == static_cast<uint8_t>(Op::DELETE) ||
-           value == static_cast<uint8_t>(Op::LIST);
+    return value == static_cast<uint8_t>(Op::save) ||
+           value == static_cast<uint8_t>(Op::restore) ||
+           value == static_cast<uint8_t>(Op::remove) ||
+           value == static_cast<uint8_t>(Op::list);
   }
 
   enum class Status : uint16_t
   {
-    SUCCESS_RESTORE = 210,
-    SUCCESS_LIST = 211,
-    SUCCESS_SAVE = 212,     // no size or payload
-    ERROR_NO_FILE = 1001,   // no size or payload
-    ERROR_NO_CLIENT = 1002, // only version and status
-    ERROR_GENERAL = 1003,   // only version and status
+    success_restore = 210,
+    success_list = 211,
+    success_save = 212,     // no size or payload
+    error_no_file = 1001,   // no size or payload
+    error_no_client = 1002, // only version and status
+    error_general = 1003,   // only version and status
   };
 } // anonymous namespace
 
@@ -318,7 +316,7 @@ namespace
 
     const std::filesystem::path get_user_dir_path() const
     {
-      return std::filesystem::path("C:\\") / maman14::SERVER_DIR_NAME / std::to_string(user_id);
+      return std::filesystem::path("C:\\") / maman14::server_dir_name / std::to_string(user_id);
     }
 
     virtual std::unique_ptr<Response> process() = 0; // one day son, I will const process() as well. one day.
@@ -509,42 +507,42 @@ namespace
   {
   public:
     ResponseSuccessRestore(Filename filename, Payload payload)
-        : ResponseWithPayload(maman14::SERVER_VERSION, Status::SUCCESS_RESTORE, std::move(filename), std::move(payload)){};
+        : ResponseWithPayload(maman14::server_version, Status::success_restore, std::move(filename), std::move(payload)){};
   };
 
   class ResponseSuccessList final : public ResponseWithPayload
   {
   public:
     ResponseSuccessList(Filename filename, Payload payload)
-        : ResponseWithPayload(maman14::SERVER_VERSION, Status::SUCCESS_LIST, std::move(filename), std::move(payload)){};
+        : ResponseWithPayload(maman14::server_version, Status::success_list, std::move(filename), std::move(payload)){};
   };
 
   class ResponseSuccessSave final : public ResponseWithFileName
   {
   public:
     ResponseSuccessSave(Filename filename)
-        : ResponseWithFileName(maman14::SERVER_VERSION, Status::SUCCESS_SAVE, std::move(filename)){};
+        : ResponseWithFileName(maman14::server_version, Status::success_save, std::move(filename)){};
   };
 
   class ResponseErrorNoFile final : public ResponseWithFileName
   {
   public:
     ResponseErrorNoFile(Filename filename)
-        : ResponseWithFileName(maman14::SERVER_VERSION, Status::ERROR_NO_FILE, std::move(filename)){};
+        : ResponseWithFileName(maman14::server_version, Status::error_no_file, std::move(filename)){};
   };
 
   class ResponseErrorNoClient final : public Response
   {
   public:
     ResponseErrorNoClient()
-        : Response(maman14::SERVER_VERSION, Status::ERROR_NO_CLIENT){};
+        : Response(maman14::server_version, Status::error_no_client){};
   };
 
   class ResponseErrorGeneral final : public Response
   {
   public:
     ResponseErrorGeneral()
-        : Response(maman14::SERVER_VERSION, Status::ERROR_GENERAL){};
+        : Response(maman14::server_version, Status::error_general){};
   };
 
   // Request concrete classs (final, non-abstract)
@@ -553,7 +551,7 @@ namespace
   {
   public:
     RequestSave(uint32_t user_id, uint8_t version, Filename filename, Payload payload)
-        : RequestWithPayload(user_id, version, Op::SAVE, std::move(filename), std::move(payload)){};
+        : RequestWithPayload(user_id, version, Op::save, std::move(filename), std::move(payload)){};
 
     std::unique_ptr<Response> process() override
     {
@@ -575,7 +573,7 @@ namespace
   {
   public:
     RequestRestore(uint32_t user_id, uint8_t version, Filename filename)
-        : RequestWithFileName(user_id, version, Op::RESTORE, std::move(filename)){};
+        : RequestWithFileName(user_id, version, Op::restore, std::move(filename)){};
 
     std::unique_ptr<Response> process() override
     {
@@ -605,7 +603,7 @@ namespace
   {
   public:
     RequestDelete(uint32_t user_id, uint8_t version, Filename filename)
-        : RequestWithFileName(user_id, version, Op::DELETE, std::move(filename)){};
+        : RequestWithFileName(user_id, version, Op::remove, std::move(filename)){};
 
     std::unique_ptr<Response> process() override
     {
@@ -635,7 +633,7 @@ namespace
   {
   public:
     RequestList(uint32_t user_id, uint8_t version)
-        : Request(user_id, version, Op::LIST){};
+        : Request(user_id, version, Op::list){};
 
     std::unique_ptr<Response> process() override
     {
@@ -730,11 +728,11 @@ namespace
 
     auto &[user_id, version, op] = *user_id_and_version_and_op;
 
-    if (op == Op::LIST)
+    if (op == Op::list)
     {
       return std::make_unique<RequestList>(user_id, version);
     }
-    if (op == Op::RESTORE || op == Op::DELETE || op == Op::SAVE)
+    if (op == Op::restore || op == Op::remove || op == Op::save)
     {
       auto filename = Filename::read_from_socket(socket, error);
       if (!filename)
@@ -742,11 +740,11 @@ namespace
         return {};
       }
 
-      if (op == Op::RESTORE)
+      if (op == Op::restore)
       {
         return std::make_unique<RequestRestore>(user_id, version, std::move(filename.value()));
       }
-      else if (op == Op::DELETE)
+      else if (op == Op::remove)
       {
         return std::make_unique<RequestDelete>(user_id, version, std::move(filename.value()));
       }
@@ -848,8 +846,6 @@ namespace maman14
   }
 
 } // namespace maman14
-
-#define DELETE (0x00010000L)
 
 #ifndef DEBUG
 #undef log
