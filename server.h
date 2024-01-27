@@ -15,6 +15,41 @@
 
 #undef DELETE // the DELETE macro collides with Op::DELETE definition
 
+#define DEBUG
+
+namespace
+{
+  template <typename T>
+  void print_args(std::ostream &os, const T &t)
+  {
+    os << t;
+  }
+
+  template <typename T, typename... Args>
+  void print_args(std::ostream &os, const T &t, Args... args)
+  {
+    os << t;
+    print_args(os, args...);
+  }
+} // anonymous namespace
+
+#ifdef DEBUG
+#define DEBUG_COUT(...)                       \
+  do                                          \
+  {                                           \
+    print_args(std::cout, __VA_ARGS__, '\n'); \
+  } while (0)
+
+#define DEBUG_CERR(...)                       \
+  do                                          \
+  {                                           \
+    print_args(std::cerr, __VA_ARGS__, '\n'); \
+  } while (0)
+#else
+#define DEBUG_COUT(...) (void)0
+#define DEBUG_CERR(...) (void)0
+#endif
+
 namespace maman14
 {
   static constexpr inline uint8_t SERVER_VERSION = 3;
@@ -84,14 +119,14 @@ namespace
       boost::asio::write(socket, boost::asio::buffer(&size, sizeof(size)), error);
       if (error)
       {
-        std::cerr << "Failed to write payload size: " << error.message() << '\n';
+        DEBUG_CERR("Failed to write payload size: ", error.message());
         return false;
       }
 
       boost::asio::write(socket, boost::asio::buffer(content.get(), size), error);
       if (error)
       {
-        std::cerr << "Failed to write payload: " << error.message() << '\n';
+        DEBUG_CERR("Failed to write payload content: ", error.message());
         return false;
       }
 
@@ -103,14 +138,14 @@ namespace
       std::ofstream file(file_path, std::ios::binary | std::ios::trunc);
       if (!file)
       {
-        std::cerr << "Failed to open file: " << file_path << '\n';
+        DEBUG_CERR("Failed to open file: ", file_path);
         return false;
       }
 
       file.write(reinterpret_cast<const char *>(content.get()), size);
       if (!file)
       {
-        std::cerr << "Failed to write to file: " << file_path << '\n';
+        DEBUG_CERR("Failed to write to file: ", file_path);
         return false;
       }
 
@@ -123,14 +158,14 @@ namespace
       boost::asio::read(socket, boost::asio::buffer(&payload.size, sizeof(payload.size)), error);
       if (error)
       {
-        std::cerr << "Failed to read payload size: " << error.message() << '\n';
+        DEBUG_CERR("Failed to read payload size: ", error.message());
         return {};
       }
       payload.content = std::make_unique<uint8_t[]>(payload.size);
       boost::asio::read(socket, boost::asio::buffer(payload.content.get(), payload.size), error);
       if (error)
       {
-        std::cerr << "Failed to read payload content: " << error.message() << '\n';
+        DEBUG_CERR("Failed to read payload content: ", error.message());
         return {};
       }
 
@@ -142,7 +177,7 @@ namespace
       std::ifstream file(file_path, std::ios::binary | std::ios::ate);
       if (!file)
       {
-        std::cerr << "Failed to open file: " << file_path << '\n';
+        DEBUG_CERR("Failed to open file: ", file_path);
         return {};
       }
 
@@ -151,7 +186,7 @@ namespace
 
       if (size > std::numeric_limits<uint32_t>::max())
       {
-        std::cerr << "File size is too big: " << size << '\n';
+        DEBUG_CERR("File size is too big: ", size);
         return {};
       }
 
@@ -159,7 +194,7 @@ namespace
       file.read(reinterpret_cast<char *>(content.get()), size);
       if (!file)
       {
-        std::cerr << "Failed to read file: " << file_path << '\n';
+        DEBUG_CERR("Failed to read file: ", file_path);
         return {};
       }
 
@@ -211,14 +246,14 @@ namespace
       boost::asio::write(socket, boost::asio::buffer(&name_len, sizeof(name_len)), error);
       if (error)
       {
-        std::cerr << "Failed to write name_len: " << error.message() << '\n';
+        DEBUG_CERR("Failed to write name_len: ", error.message());
         return false;
       }
 
       boost::asio::write(socket, boost::asio::buffer(filename.get(), name_len), error);
       if (error)
       {
-        std::cerr << "Failed to write filename: " << error.message() << '\n';
+        DEBUG_CERR("Failed to write filename: ", error.message());
         return false;
       }
 
@@ -231,7 +266,7 @@ namespace
       boost::asio::read(socket, boost::asio::buffer(&filename.name_len, sizeof(filename.name_len)), error);
       if (error)
       {
-        std::cerr << "Failed to read name_len: " << error.message() << '\n';
+        DEBUG_CERR("Failed to read name_len: ", error.message());
         return {};
       }
 
@@ -239,7 +274,7 @@ namespace
       boost::asio::read(socket, boost::asio::buffer(filename.filename.get(), filename.name_len), error);
       if (error)
       {
-        std::cerr << "Failed to read filename: " << error.message() << '\n';
+        DEBUG_CERR("Failed to read filename: ", error.message());
         return {};
       }
 
@@ -291,13 +326,13 @@ namespace
       boost::asio::read(socket, boost::asio::buffer(&data, sizeof(data)), error);
       if (error)
       {
-        std::cerr << "Failed to read request: " << error.message() << '\n';
+        DEBUG_CERR("Failed to read request: ", error.message());
         return std::nullopt;
       }
 
       if (!is_valid_op(static_cast<uint8_t>(data.op)))
       {
-        std::cerr << "Invalid op: " << static_cast<uint16_t>(data.op) << '\n';
+        DEBUG_CERR("Invalid op: ", static_cast<uint16_t>(data.op));
         return std::nullopt;
       }
 
@@ -400,7 +435,7 @@ namespace
       boost::asio::write(socket, boost::asio::buffer(&this->version, sizeof(version) + sizeof(status)), error);
       if (error)
       {
-        std::cerr << "Failed to write response: " << error.message() << '\n';
+        DEBUG_CERR("Failed to write response: ", error.message());
         return false;
       }
 
@@ -616,7 +651,7 @@ namespace
 
       if (std::error_code ec; !std::filesystem::remove(file_path, ec))
       {
-        std::cerr << "Failed to delete file: " << file_path << '\n';
+        DEBUG_CERR("Failed to delete file: ", file_path);
         return std::make_unique<ResponseErrorGeneral>();
       }
 
@@ -675,7 +710,7 @@ namespace
       std::fstream file(file_path, std::ios::in | std::ios::out | std::ios::trunc);
       if (!file)
       {
-        std::cerr << "Failed to create file: " << file_path << '\n';
+        DEBUG_CERR("Failed to create file: ", file_path);
         return std::nullopt;
       }
 
@@ -698,7 +733,7 @@ namespace
       std::string content = oss.str();
       if (auto file_size = content.size(); file_size > std::numeric_limits<uint32_t>::max())
       {
-        std::cerr << "File size is too big: " << file_size << '\n';
+        DEBUG_CERR("File size is too big: ", file_size);
         return std::nullopt;
       }
 
@@ -777,37 +812,41 @@ namespace
   {
     boost::system::error_code error;
 
-    std::cout << "Receiving request:\n";
+    DEBUG_COUT("Receiving request :)");
     auto request = read_request(socket, error);
     if (!request)
     {
-      std::cout << "Request reading failed!" << '\n';
+      DEBUG_COUT("Request reading failed!");
       return;
     }
-    std::cout << *request << '\n';
+    DEBUG_COUT(*request);
 
     if (socket.available())
     {
-      std::cout << "Socket had redundant data. Discarding it.\n";
+      DEBUG_COUT("Socket had redundant data. Discarding it.");
       if (!clear_socket(socket, error))
       {
-        std::cout << "Failed to discard extra data: " << error.message() << '\n';
+        DEBUG_COUT("Failed to discard extra data: ", error.message());
         return;
       }
     }
 
-    std::cout << "Generating response:\n";
+    DEBUG_COUT("Request received. Generating response:");
     auto response = request->process();
     if (!response)
     {
-      std::cout << "Request processing failed!" << '\n';
+      DEBUG_COUT("Request processing failed!");
       return;
     }
-    std::cout << *response << '\n';
+    DEBUG_COUT(*response);
 
-    std::cout << "Sending response:\n";
-    response->write_to_socket(socket, error);
-    std::cout << "Response sent\n\n";
+    DEBUG_COUT("Sending response:");
+    if (!response->write_to_socket(socket, error))
+    {
+      DEBUG_COUT("Failed to send response: ", error.message());
+      return;
+    }
+    DEBUG_COUT("Response sent successfully :D");
   }
 } // anonymous namespace
 
@@ -832,7 +871,7 @@ namespace maman14
     }
     catch (std::exception &e)
     {
-      std::cerr << e.what() << '\n';
+      DEBUG_CERR("Terminating server because of the following exception: ", e.what());
     }
   }
 
