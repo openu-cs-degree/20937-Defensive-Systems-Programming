@@ -778,56 +778,56 @@ namespace
     return true;
   }
 
-  void handle_client_impl(boost::asio::ip::tcp::socket socket)
+  void handle_client(boost::asio::ip::tcp::socket socket)
   {
     boost::system::error_code error;
 
-    log("Receiving request :)");
-    auto request = read_request(socket, error);
-    if (!request)
-    {
-      log("Request reading failed!");
-      return;
-    }
-    log(*request);
-
-    if (socket.available())
-    {
-      log("Socket had redundant data. Discarding it.");
-      if (!clear_socket(socket, error))
-      {
-        log("Failed to discard extra data: ", error.message());
-        return;
-      }
-    }
-
-    log("Request received. Generating response:");
-    auto response = request->process();
-    if (!response)
-    {
-      log("Request processing failed!");
-      return;
-    }
-    log(*response);
-
-    log("Sending response:");
-    if (!response->write_to_socket(socket, error))
-    {
-      log("Failed to send response: ", error.message());
-      return;
-    }
-    log("Response sent successfully :D");
-  }
-
-  void handle_client(boost::asio::ip::tcp::socket socket)
-  {
     try
     {
-      handle_client_impl(std::move(socket));
+      log("Receiving request :)");
+      auto request = read_request(socket, error);
+      if (!request)
+      {
+        log("Request reading failed!");
+        return;
+      }
+      log(*request);
+
+      if (socket.available())
+      {
+        log("Socket had redundant data. Discarding it.");
+        if (!clear_socket(socket, error))
+        {
+          log("Failed to discard extra data: ", error.message());
+          return;
+        }
+      }
+
+      log("Request received. Generating response:");
+      auto response = request->process();
+      if (!response)
+      {
+        log("Request processing failed!");
+        return;
+      }
+      log(*response);
+
+      log("Sending response:");
+      if (!response->write_to_socket(socket, error))
+      {
+        log("Failed to send response: ", error.message());
+        return;
+      }
+      log("Response sent successfully :D");
     }
     catch ([[maybe_unused]] std::exception &e)
     {
-      log("Terminating client because of the following exception: ", e.what());
+      ResponseErrorGeneral response;
+      response.write_to_socket(socket, error);
+      if (error)
+      {
+        log("Terminating client because of the following exception: ", e.what());
+      }
     }
   }
 } // anonymous namespace
