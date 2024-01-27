@@ -65,6 +65,11 @@ namespace
     Payload() = default;
 
   public:
+    Payload(const Payload &) = delete;
+    Payload &operator=(const Payload &) = delete;
+    Payload(Payload &&) = default;
+    Payload &operator=(Payload &&) = default;
+
     Payload(uint32_t size, std::unique_ptr<uint8_t[]> content)
         : size(size), content(std::move(content)){};
 
@@ -182,6 +187,11 @@ namespace
     Filename() = default;
 
   public:
+    Filename(const Filename &) = delete;
+    Filename &operator=(const Filename &) = delete;
+    Filename(Filename &&) = default;
+    Filename &operator=(Filename &&) = default;
+
     Filename(uint16_t name_len, std::unique_ptr<char[]> filename)
         : name_len(name_len), filename(std::move(filename)) {}
 
@@ -261,6 +271,11 @@ namespace
         : user_id(user_id), version(version), op(op){};
 
   public:
+    Request(const Request &) = delete;
+    Request &operator=(const Request &) = delete;
+    Request(Request &&) = default;
+    Request &operator=(Request &&) = default;
+
     virtual ~Request() = default;
 
     static const std::optional<std::tuple<uint32_t, uint8_t, Op>> read_user_id_and_version_and_op(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
@@ -321,6 +336,11 @@ namespace
         : Request(user_id, version, op), filename(std::move(filename)){};
 
   public:
+    RequestWithFileName(const RequestWithFileName &) = delete;
+    RequestWithFileName &operator=(const RequestWithFileName &) = delete;
+    RequestWithFileName(RequestWithFileName &&) = default;
+    RequestWithFileName &operator=(RequestWithFileName &&) = default;
+
     virtual ~RequestWithFileName() = default;
 
     const std::filesystem::path create_and_get_user_file_path() const
@@ -345,6 +365,13 @@ namespace
         : RequestWithFileName(user_id, version, op, std::move(filename)), payload(std::move(payload)){};
 
   public:
+    RequestWithPayload(const RequestWithPayload &) = delete;
+    RequestWithPayload &operator=(const RequestWithPayload &) = delete;
+    RequestWithPayload(RequestWithPayload &&) = default;
+    RequestWithPayload &operator=(RequestWithPayload &&) = default;
+
+    virtual ~RequestWithPayload() = default;
+
     void print(std::ostream &os) const
     {
       RequestWithFileName::print(os);
@@ -364,6 +391,13 @@ namespace
         : version(version), status(status){};
 
   public:
+    Response(const Response &) = delete;
+    Response &operator=(const Response &) = delete;
+    Response(Response &&) = default;
+    Response &operator=(Response &&) = default;
+
+    virtual ~Response() = default;
+
     virtual const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
       boost::asio::write(socket, boost::asio::buffer(&this->version, sizeof(version) + sizeof(status)), error);
@@ -398,6 +432,13 @@ namespace
         : Response(version, status), filename(std::move(filename)){};
 
   public:
+    ResponseWithFileName(const ResponseWithFileName &) = delete;
+    ResponseWithFileName &operator=(const ResponseWithFileName &) = delete;
+    ResponseWithFileName(ResponseWithFileName &&) = default;
+    ResponseWithFileName &operator=(ResponseWithFileName &&) = default;
+
+    virtual ~ResponseWithFileName() = default;
+
     virtual const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
       if (!Response::write_to_socket(socket, error))
@@ -429,6 +470,13 @@ namespace
         : ResponseWithFileName(version, status, std::move(filename)), payload(std::move(payload)){};
 
   public:
+    ResponseWithPayload(const ResponseWithPayload &) = delete;
+    ResponseWithPayload &operator=(const ResponseWithPayload &) = delete;
+    ResponseWithPayload(ResponseWithPayload &&) = default;
+    ResponseWithPayload &operator=(ResponseWithPayload &&) = default;
+
+    virtual ~ResponseWithPayload() = default;
+
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
       if (!ResponseWithFileName::write_to_socket(socket, error))
