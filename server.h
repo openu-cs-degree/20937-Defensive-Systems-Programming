@@ -304,11 +304,9 @@ namespace
       return std::make_tuple(data.user_id, data.version, data.op);
     }
 
-    const std::filesystem::path create_and_get_user_dir_path() const
+    const std::filesystem::path get_user_dir_path() const
     {
-      std::filesystem::path dir_path = std::filesystem::path("C:\\") / maman14::SERVER_DIR_NAME / std::to_string(user_id);
-      std::filesystem::create_directories(dir_path); // TODO: check return value (and return bool?)
-      return dir_path;
+      return std::filesystem::path("C:\\") / maman14::SERVER_DIR_NAME / std::to_string(user_id);
     }
 
     virtual std::unique_ptr<Response> process() = 0; // one day son, I will const process() as well. one day.
@@ -343,10 +341,9 @@ namespace
 
     virtual ~RequestWithFileName() = default;
 
-    const std::filesystem::path create_and_get_user_file_path() const
+    const std::filesystem::path get_user_file_path(const std::filesystem::path &user_dir_path) const
     {
-      std::filesystem::path dir_path = create_and_get_user_dir_path();
-      return dir_path / filename.get_name();
+      return user_dir_path / filename.get_name();
     }
 
     virtual void print(std::ostream &os) const
@@ -553,8 +550,11 @@ namespace
 
     std::unique_ptr<Response> process() override
     {
-      auto file_path = create_and_get_user_file_path();
+      auto dir_path = get_user_dir_path();
 
+      std::filesystem::create_directories(dir_path);
+
+      auto file_path = get_user_file_path(dir_path);
       if (!payload.write_to_file(file_path))
       {
         return std::make_unique<ResponseErrorGeneral>();
@@ -572,7 +572,17 @@ namespace
 
     std::unique_ptr<Response> process() override
     {
-      auto file_path = create_and_get_user_file_path();
+      auto dir_path = get_user_dir_path();
+      if (!std::filesystem::exists(dir_path) || std::filesystem::is_empty(dir_path))
+      {
+        return std::make_unique<ResponseErrorNoClient>();
+      }
+
+      auto file_path = get_user_file_path(dir_path);
+      if (!std::filesystem::exists(file_path))
+      {
+        return std::make_unique<ResponseErrorNoFile>(std::move(filename));
+      }
 
       auto payload = Payload::read_from_file(file_path);
       if (!payload)
@@ -592,7 +602,17 @@ namespace
 
     std::unique_ptr<Response> process() override
     {
-      auto file_path = create_and_get_user_file_path();
+      auto dir_path = get_user_dir_path();
+      if (!std::filesystem::exists(dir_path) || std::filesystem::is_empty(dir_path))
+      {
+        return std::make_unique<ResponseErrorNoClient>();
+      }
+
+      auto file_path = get_user_file_path(dir_path);
+      if (!std::filesystem::exists(file_path))
+      {
+        return std::make_unique<ResponseErrorNoFile>(std::move(filename));
+      }
 
       if (std::error_code ec; !std::filesystem::remove(file_path, ec))
       {
@@ -612,7 +632,12 @@ namespace
 
     std::unique_ptr<Response> process() override
     {
-      std::filesystem::path user_dir_path = create_and_get_user_dir_path();
+      std::filesystem::path user_dir_path = get_user_dir_path();
+      if (!std::filesystem::exists(user_dir_path) || std::filesystem::is_empty(user_dir_path))
+      {
+        return std::make_unique<ResponseErrorNoClient>();
+      }
+
       const auto user_file_name = generate_random_file_name();
       std::filesystem::path user_file_path = user_dir_path / user_file_name;
 
