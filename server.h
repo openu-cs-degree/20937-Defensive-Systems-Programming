@@ -778,7 +778,7 @@ namespace
     return true;
   }
 
-  void handle_client(boost::asio::ip::tcp::socket socket)
+  void handle_client_impl(boost::asio::ip::tcp::socket socket)
   {
     boost::system::error_code error;
 
@@ -817,6 +817,18 @@ namespace
       return;
     }
     log("Response sent successfully :D");
+  }
+
+  void handle_client(boost::asio::ip::tcp::socket socket)
+  {
+    try
+    {
+      handle_client_impl(std::move(socket));
+    }
+    catch ([[maybe_unused]] std::exception &e)
+    {
+      log("Terminating client because of the following exception: ", e.what());
+    }
   }
 } // anonymous namespace
 
