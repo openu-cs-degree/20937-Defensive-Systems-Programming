@@ -254,11 +254,17 @@ namespace
     {
       Filename filename;
 
-      SOCKET_READ(&filename.name_len, sizeof(filename.name_len), {}, "Failed to read name_len: ", error.message());
+      SOCKET_READ(&filename.name_len, sizeof(filename.name_len), std::nullopt, "Failed to read name_len: ", error.message());
 
       filename.filename = std::make_unique<char[]>(filename.name_len);
 
-      SOCKET_READ(filename.filename.get(), filename.name_len, {}, "Failed to read filename: ", error.message());
+      SOCKET_READ(filename.filename.get(), filename.name_len, std::nullopt, "Failed to read filename: ", error.message());
+
+      if (!filename.is_filename_valid())
+      {
+        DEBUG_CERR("Invalid filename: ", filename.get_name());
+        return std::nullopt;
+      }
 
       return filename;
     }
@@ -268,6 +274,13 @@ namespace
       os << "name_len: " << filename.name_len << '\n';
       os << "filename: " << filename.get_name() << '\n';
       return os;
+    }
+
+  private:
+    const bool is_filename_valid() const
+    {
+      return std::all_of(filename.get(), filename.get() + name_len, [](char c) -> bool
+                         { return std::isalnum(c) || c == '.' || c == '_' || c == '-'; });
     }
   };
 
