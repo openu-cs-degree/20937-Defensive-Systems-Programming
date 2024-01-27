@@ -31,7 +31,7 @@ namespace
     LIST = 202,    // no size, payload, name_len or filename
   };
 
-  bool is_valid_op(uint8_t value)
+  const bool is_valid_op(uint8_t value)
   {
     return value == static_cast<uint8_t>(Op::SAVE) ||
            value == static_cast<uint8_t>(Op::RESTORE) ||
@@ -74,7 +74,7 @@ namespace
       std::copy(content.begin(), content.end(), this->content.get());
     }
 
-    bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+    const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
       boost::asio::write(socket, boost::asio::buffer(&size, sizeof(size)), error);
       if (error)
@@ -93,7 +93,7 @@ namespace
       return true;
     };
 
-    bool write_to_file(const std::filesystem::path &file_path) const
+    const bool write_to_file(const std::filesystem::path &file_path) const
     {
       std::ofstream file(file_path, std::ios::binary | std::ios::trunc);
       if (!file)
@@ -112,7 +112,7 @@ namespace
       return true;
     }
 
-    static std::optional<Payload> read_from_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+    static const std::optional<Payload> read_from_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
     {
       Payload payload;
       boost::asio::read(socket, boost::asio::buffer(&payload.size, sizeof(payload.size)), error);
@@ -132,7 +132,7 @@ namespace
       return payload;
     };
 
-    static std::optional<Payload> read_from_file(const std::filesystem::path &file_path)
+    static const std::optional<Payload> read_from_file(const std::filesystem::path &file_path)
     {
       std::ifstream file(file_path, std::ios::binary | std::ios::ate);
       if (!file)
@@ -144,6 +144,12 @@ namespace
       std::streamsize size = file.tellg();
       file.seekg(0, std::ios::beg);
 
+      if (size > std::numeric_limits<uint32_t>::max())
+      {
+        std::cerr << "File size is too big: " << size << '\n';
+        return {};
+      }
+
       std::unique_ptr<uint8_t[]> content(new uint8_t[static_cast<uint32_t>(size)]);
       file.read(reinterpret_cast<char *>(content.get()), size);
       if (!file)
@@ -152,15 +158,17 @@ namespace
         return {};
       }
 
-      return Payload{static_cast<uint32_t>(size), std::move(content)};
+      return std::make_optional<Payload>(static_cast<uint32_t>(size), std::move(content));
     }
 
     friend std::ostream &operator<<(std::ostream &os, const Payload &payload)
     {
       static constexpr uint32_t MAX_PAYLOAD_PRINT_SIZE = 420;
+
       os << "payload size: " << payload.size << '\n';
       os << (payload.size > MAX_PAYLOAD_PRINT_SIZE ? "payload (printing limited to 420 bytes):\n" : "payload:\n")
          << std::string_view(reinterpret_cast<const char *>(payload.content.get()), std::min(payload.size, MAX_PAYLOAD_PRINT_SIZE)) << '\n';
+
       return os;
     }
   };
@@ -169,6 +177,9 @@ namespace
   {
     uint16_t name_len;
     std::unique_ptr<char[]> filename;
+
+  private:
+    Filename() = default;
 
   public:
     Filename(uint16_t name_len, std::unique_ptr<char[]> filename)
@@ -185,7 +196,7 @@ namespace
       return std::string_view(filename.get(), name_len);
     }
 
-    bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+    const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
       boost::asio::write(socket, boost::asio::buffer(&name_len, sizeof(name_len)), error);
       if (error)
@@ -204,25 +215,25 @@ namespace
       return true;
     }
 
-    static std::optional<Filename> read_from_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+    static const std::optional<Filename> read_from_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
     {
-      uint16_t name_len;
-      boost::asio::read(socket, boost::asio::buffer(&name_len, sizeof(name_len)), error);
+      Filename filename;
+      boost::asio::read(socket, boost::asio::buffer(&filename.name_len, sizeof(filename.name_len)), error);
       if (error)
       {
         std::cerr << "Failed to read name_len: " << error.message() << '\n';
         return {};
       }
 
-      std::unique_ptr<char[]> filename(new char[name_len]);
-      boost::asio::read(socket, boost::asio::buffer(filename.get(), name_len), error);
+      filename.filename = std::make_unique<char[]>(filename.name_len);
+      boost::asio::read(socket, boost::asio::buffer(filename.filename.get(), filename.name_len), error);
       if (error)
       {
         std::cerr << "Failed to read filename: " << error.message() << '\n';
         return {};
       }
 
-      return Filename{name_len, std::move(filename)};
+      return filename;
     }
 
     friend std::ostream &operator<<(std::ostream &os, const Filename &filename)
@@ -242,9 +253,9 @@ namespace
   class Request
   {
   protected:
-    uint32_t user_id;
-    uint8_t version;
-    Op op;
+    const uint32_t user_id;
+    const uint8_t version;
+    const Op op;
 
     Request(uint32_t user_id, uint8_t version, Op op)
         : user_id(user_id), version(version), op(op){};
@@ -252,7 +263,7 @@ namespace
   public:
     virtual ~Request() = default;
 
-    static std::optional<std::tuple<uint32_t, uint8_t, Op>> read_user_id_and_version_and_op(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+    static const std::optional<std::tuple<uint32_t, uint8_t, Op>> read_user_id_and_version_and_op(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
     {
       struct RequestData
       {
@@ -278,14 +289,14 @@ namespace
       return std::make_tuple(data.user_id, data.version, data.op);
     }
 
-    std::filesystem::path create_and_get_user_dir_path() const
+    const std::filesystem::path create_and_get_user_dir_path() const
     {
       std::filesystem::path dir_path = std::filesystem::path("C:\\") / maman14::SERVER_DIR_NAME / std::to_string(user_id);
       std::filesystem::create_directories(dir_path); // TODO: check return value (and return bool?)
       return dir_path;
     }
 
-    virtual std::unique_ptr<Response> process() = 0;
+    virtual std::unique_ptr<Response> process() = 0; // one day son, I will const process() as well. one day.
 
     virtual void print(std::ostream &os) const
     {
@@ -304,7 +315,7 @@ namespace
   class RequestWithFileName : public Request
   {
   protected:
-    Filename filename;
+    Filename filename; // TODO: figure why I can't const it
 
     RequestWithFileName(uint32_t user_id, uint8_t version, Op op, Filename filename)
         : Request(user_id, version, op), filename(std::move(filename)){};
@@ -312,7 +323,7 @@ namespace
   public:
     virtual ~RequestWithFileName() = default;
 
-    std::filesystem::path create_and_get_user_file_path() const
+    const std::filesystem::path create_and_get_user_file_path() const
     {
       std::filesystem::path dir_path = create_and_get_user_dir_path();
       return dir_path / filename.get_name();
@@ -328,7 +339,7 @@ namespace
   class RequestWithPayload : public RequestWithFileName
   {
   protected:
-    Payload payload;
+    const Payload payload;
 
     RequestWithPayload(uint32_t user_id, uint8_t version, Op op, Filename filename, Payload payload)
         : RequestWithFileName(user_id, version, op, std::move(filename)), payload(std::move(payload)){};
@@ -346,14 +357,14 @@ namespace
   class Response
   {
   protected:
-    uint8_t version;
-    Status status;
+    const uint8_t version;
+    const Status status;
 
     Response(uint8_t version, Status status)
         : version(version), status(status){};
 
   public:
-    virtual bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+    virtual const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
       boost::asio::write(socket, boost::asio::buffer(&this->version, sizeof(version) + sizeof(status)), error);
       if (error)
@@ -381,13 +392,13 @@ namespace
   class ResponseWithFileName : public Response
   {
   protected:
-    Filename filename;
+    const Filename filename;
 
     ResponseWithFileName(uint8_t version, Status status, Filename filename)
         : Response(version, status), filename(std::move(filename)){};
 
   public:
-    virtual bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+    virtual const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
       if (!Response::write_to_socket(socket, error))
       {
@@ -412,13 +423,13 @@ namespace
   class ResponseWithPayload : public ResponseWithFileName
   {
   protected:
-    Payload payload;
+    const Payload payload;
 
     ResponseWithPayload(uint8_t version, Status status, Filename filename, Payload payload)
         : ResponseWithFileName(version, status, std::move(filename)), payload(std::move(payload)){};
 
   public:
-    bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+    const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
       if (!ResponseWithFileName::write_to_socket(socket, error))
       {
@@ -598,7 +609,7 @@ namespace
       return file;
     }
 
-    std::optional<Payload> write_directory_to_file(const std::filesystem::path &src_path, const std::string_view &ignored_filename, std::fstream &dst_file)
+    const std::optional<Payload> write_directory_to_file(const std::filesystem::path &src_path, const std::string_view &ignored_filename, std::fstream &dst_file) const
     {
       std::ostringstream oss;
       std::for_each(std::filesystem::directory_iterator(src_path),
@@ -674,7 +685,7 @@ namespace
     return {};
   }
 
-  bool clear_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+  const bool clear_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
   {
     boost::asio::streambuf discard_buffer;
     while (socket.available())
