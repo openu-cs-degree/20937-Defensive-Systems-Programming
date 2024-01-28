@@ -121,10 +121,10 @@ namespace
     }                                                                                          \
   } while (0)
 
-#define SOCKET_WRITE(pointer, size, error_value, ...) \
+#define SOCKET_WRITE_OR_RETURN(pointer, size, error_value, ...) \
   SOCKET_IO(boost::asio::write, pointer, size, error_value, __VA_ARGS__)
 
-#define SOCKET_READ(pointer, size, error_value, ...) \
+#define SOCKET_READ_OR_RETURN(pointer, size, error_value, ...) \
   SOCKET_IO(boost::asio::read, pointer, size, error_value, __VA_ARGS__)
 #pragma endregion
 
@@ -212,9 +212,9 @@ namespace
 
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
-      SOCKET_WRITE(&size, sizeof(size), false, "Failed to write payload size: ", error.message());
+      SOCKET_WRITE_OR_RETURN(&size, sizeof(size), false, "Failed to write payload size: ", error.message());
 
-      SOCKET_WRITE(content.get(), size, false, "Failed to write payload content: ", error.message());
+      SOCKET_WRITE_OR_RETURN(content.get(), size, false, "Failed to write payload content: ", error.message());
 
       return true;
     };
@@ -242,11 +242,11 @@ namespace
     {
       Payload payload;
 
-      SOCKET_READ(&payload.size, sizeof(payload.size), {}, "Failed to read payload size: ", error.message());
+      SOCKET_READ_OR_RETURN(&payload.size, sizeof(payload.size), {}, "Failed to read payload size: ", error.message());
 
       payload.content = std::make_unique<uint8_t[]>(payload.size);
 
-      SOCKET_READ(payload.content.get(), payload.size, {}, "Failed to read payload content: ", error.message());
+      SOCKET_READ_OR_RETURN(payload.content.get(), payload.size, {}, "Failed to read payload content: ", error.message());
 
       return payload;
     };
@@ -322,9 +322,9 @@ namespace
 
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
-      SOCKET_WRITE(&name_len, sizeof(name_len), false, "Failed to write name_len: ", error.message());
+      SOCKET_WRITE_OR_RETURN(&name_len, sizeof(name_len), false, "Failed to write name_len: ", error.message());
 
-      SOCKET_WRITE(filename.get(), name_len, false, "Failed to write filename: ", error.message());
+      SOCKET_WRITE_OR_RETURN(filename.get(), name_len, false, "Failed to write filename: ", error.message());
 
       return true;
     }
@@ -333,11 +333,11 @@ namespace
     {
       Filename filename;
 
-      SOCKET_READ(&filename.name_len, sizeof(filename.name_len), std::nullopt, "Failed to read name_len: ", error.message());
+      SOCKET_READ_OR_RETURN(&filename.name_len, sizeof(filename.name_len), std::nullopt, "Failed to read name_len: ", error.message());
 
       filename.filename = std::make_unique<char[]>(filename.name_len);
 
-      SOCKET_READ(filename.filename.get(), filename.name_len, std::nullopt, "Failed to read filename: ", error.message());
+      SOCKET_READ_OR_RETURN(filename.filename.get(), filename.name_len, std::nullopt, "Failed to read filename: ", error.message());
 
       if (!filename.is_filename_valid())
       {
@@ -397,7 +397,7 @@ namespace
       };
       RequestData data;
 
-      SOCKET_READ(&data, sizeof(data), std::nullopt, "Failed to read request: ", error.message());
+      SOCKET_READ_OR_RETURN(&data, sizeof(data), std::nullopt, "Failed to read request: ", error.message());
 
       if (!is_valid_op(static_cast<uint8_t>(data.op)))
       {
@@ -501,7 +501,7 @@ namespace
 
     virtual const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
-      SOCKET_WRITE(&this->version, sizeof(version) + sizeof(status), false, "Failed to write response: ", error.message());
+      SOCKET_WRITE_OR_RETURN(&this->version, sizeof(version) + sizeof(status), false, "Failed to write response: ", error.message());
 
       return true;
     }
@@ -972,6 +972,6 @@ namespace maman14
 #undef log
 #endif
 #undef SOCKET_IO
-#undef SOCKET_WRITE
-#undef SOCKET_READ
+#undef SOCKET_WRITE_OR_RETURN
+#undef SOCKET_READ_OR_RETURN
 #pragma endregion
