@@ -1,3 +1,67 @@
+/**
+  @file server.h
+  @author Yehonatan Simian
+  @date January 2024
+
+  +-----------------------------------------------------------------------------------+
+  |                      Defensive System Programming - Maman 14                      |
+  |                                                                                   |
+  |       "Always try to be nice, but never fail to be kind." - The 12th Doctor       |
+  +-----------------------------------------------------------------------------------+
+
+  @section DESCRIPTION ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  This project is a server that allows clients to backup files and retrieve them later.
+  The server is stateless, and supports multiple clients at the same time.
+
+  The server supports the following client requests:
+  - Save a file
+  - Restore a file
+  - Delete a file
+  - List all files
+
+  The server can respond with the following statuses:
+  - Success: Restore
+  - Success: List
+  - Success: Save / Delete
+  - Error: No such file
+  - Error: No such client
+  - Error: General error
+
+  The server is implemented using Boost.Asio, and uses TCP sockets for communication.
+
+  @note The server doesn't handle endianess, as for most modern systems are assumed to
+        be little endian, which is the requested endianess to be used.
+
+  @section REVISIONS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  - Version 1: Functioning server. No error handling, no request processing.
+  - Version 2: Processing requests, minimal error handling.
+  - Version 3: Support partial requests (omit redundant data).
+  - Version 4: First production version. Full error handling, full request processing.
+
+  @section TODO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  - Handle client sending less data than expected.
+    - Current solution: the thread waits for more data until the socket is closed.
+    - Possible solution: arbitrary timeout.
+  - Handle client sending more data than expected.
+    - Current solution: the thread discards the extra data.
+      This solution does not support clients sending few requests on the same socket.
+  - Create a thread pool. It won't prevent DDoS attacks, but at least it will prevent
+    clients from opening too many threads and crashing the server.
+  - Create tests for the server.
+
+  @section COMPILATION ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  To compile this project, I have used the following command:
+
+  cl.exe /W4 /WX /analyze /std:c++17 /Zi /EHsc /nologo /D_WIN32_WINNT=0x0A00
+         /I C:\path\to\boost "/FeC:\path\to\main.cpp"
+
+  @copyright All rights reserved (c) Yehonatan Simian 2024 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
 #include <iostream>
 #include <thread>
 #include <optional>
