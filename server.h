@@ -51,6 +51,8 @@
   - Create a thread pool. It won't prevent DDoS attacks, but at least it will prevent
     clients from opening too many threads and crashing the server.
   - Create tests for the server.
+  - Separate the protocol from the server implementation.
+    - Possible solution: using templates.
 
   @section COMPILATION ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -62,6 +64,12 @@
   @copyright All rights reserved (c) Yehonatan Simian 2024 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
+#pragma once
+
+#pragma region includes
+// +----------------------------------------------------------------------------------+
+// | Inlcudes: Standard Library and Boost                                             |
+// +----------------------------------------------------------------------------------+
 #include <iostream>
 #include <thread>
 #include <optional>
@@ -76,9 +84,12 @@
 #pragma warning(disable : 6001 6031 6101 6255 6258 6313 6387)
 #include <boost/asio.hpp>
 #pragma warning(pop)
+#pragma endregion
 
-#define DEBUG // TODO: delete
-
+#pragma region macros
+// +----------------------------------------------------------------------------------+
+// | Macros & Logging Supplements                                                     |
+// +----------------------------------------------------------------------------------+
 #ifdef DEBUG
 namespace
 {
@@ -115,13 +126,24 @@ namespace
 
 #define SOCKET_READ(pointer, size, error_value, ...) \
   SOCKET_IO(boost::asio::read, pointer, size, error_value, __VA_ARGS__)
+#pragma endregion
 
+#pragma region interface
+// +----------------------------------------------------------------------------------+
+// | Interface: user exposed functions and variables                                  |
+// +----------------------------------------------------------------------------------+
 namespace maman14
 {
   static constexpr inline uint8_t server_version = 4;
   static constexpr inline std::string_view server_dir_name = "my_server";
+  static void start_server_on_port(uint16_t port);
 } // namespace maman14
+#pragma endregion
 
+#pragma region enums
+// +----------------------------------------------------------------------------------+
+// | Enums: protocol enums and relevant functions                                     |
+// +----------------------------------------------------------------------------------+
 namespace
 {
   enum class Op : uint8_t
@@ -150,7 +172,15 @@ namespace
     error_general = 1003,   // only version and status
   };
 } // anonymous namespace
+#pragma endregion
 
+#pragma region implementation_protocol
+// +----------------------------------------------------------------------------------+
+// | Implementation of the request protocol:                                          |
+// | - Request class(es), include request processing implementation.                  |
+// | - Response class(es).                                                            |
+// | - Common class(es) for Request and Response                                      |
+// +----------------------------------------------------------------------------------+
 namespace
 {
 #pragma pack(push, 1)
@@ -778,7 +808,12 @@ namespace
   };
 #pragma pack(pop)
 } // anonymous namespace
+#pragma endregion
 
+#pragma region implementation_server
+// +----------------------------------------------------------------------------------+
+// | Implementation of the server, which should not be protocol dependent             |
+// +----------------------------------------------------------------------------------+
 namespace
 {
   std::unique_ptr<Request> read_request(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
@@ -895,7 +930,12 @@ namespace
     }
   }
 } // anonymous namespace
+#pragma endregion
 
+#pragma region implementation_interface
+// +----------------------------------------------------------------------------------+
+// | Implementation of the functions that were declared on #pragma interface          |
+// +----------------------------------------------------------------------------------+
 namespace maman14
 {
   static void start_server_on_port(uint16_t port)
@@ -922,10 +962,16 @@ namespace maman14
   }
 
 } // namespace maman14
+#pragma endregion
 
+#pragma region cleanup
+// +----------------------------------------------------------------------------------+
+// | Cleanup: undefine macros and re-define logging                                   |
+// +----------------------------------------------------------------------------------+
 #ifndef DEBUG
 #undef log
 #endif
 #undef SOCKET_IO
 #undef SOCKET_WRITE
 #undef SOCKET_READ
+#pragma endregion
