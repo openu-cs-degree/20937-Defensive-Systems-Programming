@@ -206,7 +206,7 @@ namespace
     Payload(uint32_t size, std::unique_ptr<uint8_t[]> content)
         : size(size), content(std::move(content)){};
 
-    Payload(const std::string &content)
+    explicit Payload(const std::string &content)
         : size(static_cast<uint32_t>(content.size())), content(std::make_unique<uint8_t[]>(size))
     {
       std::copy(content.begin(), content.end(), this->content.get());
@@ -312,7 +312,7 @@ namespace
     Filename(uint16_t name_len, std::unique_ptr<char[]> filename)
         : name_len(name_len), filename(std::move(filename)) {}
 
-    Filename(const std::string_view &filename)
+    explicit Filename(const std::string_view &filename)
         : name_len(static_cast<uint16_t>(filename.size())), filename(std::make_unique<char[]>(name_len))
     {
       std::move(filename.begin(), filename.end(), this->filename.get());
@@ -603,42 +603,42 @@ namespace
   class ResponseSuccessRestore final : public ResponseWithPayload
   {
   public:
-    ResponseSuccessRestore(Filename filename, Payload payload)
+    explicit ResponseSuccessRestore(Filename filename, Payload payload)
         : ResponseWithPayload(maman14::server_version, Status::success_restore, std::move(filename), std::move(payload)){};
   };
 
   class ResponseSuccessList final : public ResponseWithPayload
   {
   public:
-    ResponseSuccessList(Filename filename, Payload payload)
+    explicit ResponseSuccessList(Filename filename, Payload payload)
         : ResponseWithPayload(maman14::server_version, Status::success_list, std::move(filename), std::move(payload)){};
   };
 
   class ResponseSuccessSave final : public ResponseWithFileName
   {
   public:
-    ResponseSuccessSave(Filename filename)
+    explicit ResponseSuccessSave(Filename filename)
         : ResponseWithFileName(maman14::server_version, Status::success_save, std::move(filename)){};
   };
 
   class ResponseErrorNoFile final : public ResponseWithFileName
   {
   public:
-    ResponseErrorNoFile(Filename filename)
+    explicit ResponseErrorNoFile(Filename filename)
         : ResponseWithFileName(maman14::server_version, Status::error_no_file, std::move(filename)){};
   };
 
   class ResponseErrorNoClient final : public Response
   {
   public:
-    ResponseErrorNoClient()
+    explicit ResponseErrorNoClient()
         : Response(maman14::server_version, Status::error_no_client){};
   };
 
   class ResponseErrorGeneral final : public Response
   {
   public:
-    ResponseErrorGeneral()
+    explicit ResponseErrorGeneral()
         : Response(maman14::server_version, Status::error_general){};
   };
 
@@ -647,7 +647,7 @@ namespace
   class RequestSave final : public RequestWithPayload
   {
   public:
-    RequestSave(uint32_t user_id, uint8_t version, Filename filename, Payload payload)
+    explicit RequestSave(uint32_t user_id, uint8_t version, Filename filename, Payload payload)
         : RequestWithPayload(user_id, version, Op::save, std::move(filename), std::move(payload)){};
 
     std::unique_ptr<Response> process() override
@@ -669,7 +669,7 @@ namespace
   class RequestRestore final : public RequestWithFileName
   {
   public:
-    RequestRestore(uint32_t user_id, uint8_t version, Filename filename)
+    explicit RequestRestore(uint32_t user_id, uint8_t version, Filename filename)
         : RequestWithFileName(user_id, version, Op::restore, std::move(filename)){};
 
     std::unique_ptr<Response> process() override
@@ -699,7 +699,7 @@ namespace
   class RequestDelete final : public RequestWithFileName
   {
   public:
-    RequestDelete(uint32_t user_id, uint8_t version, Filename filename)
+    explicit RequestDelete(uint32_t user_id, uint8_t version, Filename filename)
         : RequestWithFileName(user_id, version, Op::remove, std::move(filename)){};
 
     std::unique_ptr<Response> process() override
@@ -729,7 +729,7 @@ namespace
   class RequestList final : public Request
   {
   public:
-    RequestList(uint32_t user_id, uint8_t version)
+    explicit RequestList(uint32_t user_id, uint8_t version)
         : Request(user_id, version, Op::list){};
 
     std::unique_ptr<Response> process() override
