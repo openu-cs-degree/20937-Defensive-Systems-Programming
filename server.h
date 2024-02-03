@@ -201,6 +201,7 @@ namespace
     Payload &operator=(const Payload &) = delete;
     Payload(Payload &&) = default;
     Payload &operator=(Payload &&) = default;
+    ~Payload() = default;
 
     Payload(uint32_t size, std::unique_ptr<uint8_t[]> content)
         : size(size), content(std::move(content)){};
@@ -306,6 +307,7 @@ namespace
     Filename &operator=(const Filename &) = delete;
     Filename(Filename &&) = default;
     Filename &operator=(Filename &&) = default;
+    ~Filename() = default;
 
     Filename(uint16_t name_len, std::unique_ptr<char[]> filename)
         : name_len(name_len), filename(std::move(filename)) {}
