@@ -90,9 +90,9 @@
 // +----------------------------------------------------------------------------------+
 // | Macros & Logging Supplements                                                     |
 // +----------------------------------------------------------------------------------+
-#ifdef DEBUG
 namespace
 {
+#ifdef DEBUG
   template <typename T>
   void log(const T &t)
   {
@@ -105,10 +105,11 @@ namespace
     std::cerr << t;
     log(args...);
   }
-} // anonymous namespace
 #else
-#define log(_x, ...) (void)0
+  template <typename... Args>
+  void log([[maybe_unused]] const Args &...args) {}
 #endif
+} // anonymous namespace
 
 #define SOCKET_IO(operation, pointer, size, error_value, ...)                                  \
   do                                                                                           \
@@ -968,9 +969,6 @@ namespace maman14
 // +----------------------------------------------------------------------------------+
 // | Cleanup: undefine macros and re-define logging                                   |
 // +----------------------------------------------------------------------------------+
-#ifndef DEBUG
-#undef log
-#endif
 #undef SOCKET_IO
 #undef SOCKET_WRITE_OR_RETURN
 #undef SOCKET_READ_OR_RETURN
