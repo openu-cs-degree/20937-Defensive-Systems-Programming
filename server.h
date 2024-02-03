@@ -155,7 +155,7 @@ namespace
     list = 202,    // no size, payload, name_len or filename
   };
 
-  const inline bool is_valid_op(uint8_t value)
+  auto is_valid_op(uint8_t value) -> bool
   {
     return value == static_cast<uint8_t>(Op::save) ||
            value == static_cast<uint8_t>(Op::restore) ||
