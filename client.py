@@ -1,6 +1,6 @@
 import random
 from typing import Tuple, List, Literal
-import binascii # TODO: remove
+import string
 import socket
 from enum import Enum
 import struct
@@ -49,8 +49,20 @@ def validate_status(status: Status) -> None:
 class Filename:
     def __init__(self, filename: str):
         validate_range("name_len", len(filename), "uint16_t")
+        self.validate_filename(filename)
         self.name_len = len(filename)
         self.filename = filename
+
+    @staticmethod
+    def validate_filename(filename: str) -> None:
+        # Check for directory traversal characters
+        if ".." in filename or "/" in filename or "\\" in filename:
+            raise ValueError("Invalid characters in filename")
+
+        # Check for invalid characters
+        valid_chars = "-_.() %s%s" % (string.ascii_letters, string.digits)
+        if any(char not in valid_chars for char in filename):
+            raise ValueError("Invalid characters in filename")
 
 class Payload:
     def __init__(self, size: int, payload: bytes):
