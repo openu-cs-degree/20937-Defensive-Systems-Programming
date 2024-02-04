@@ -44,10 +44,17 @@ def validate_status(status: Status) -> None:
     if status not in Status:
         raise ValueError(f"Invalid status: {status}")
 
+# common classes
+    
+class Filename:
+    def __init__(self, name_len: int, filename: str):
+        validate_range("name_len", name_len, "uint16_t")
+        self.name_len = name_len
+        self.filename = filename
+
 class Payload:
     def __init__(self, size: int, payload: bytes):
         validate_range("payload.size", size, "uint32_t")
- 
         self.size = size
         self.payload = payload
 
@@ -76,17 +83,16 @@ Request = _RequestBase
 class _RequestWithFileName(_RequestBase):
     def __init__(self, user_id: int, version: int, op: Op, filename: str):
         super().__init__(user_id, version, op)
-        self.name_len = len(filename)
-        self.filename = filename
+        self.filename = Filename(len(filename), filename)
     
     def pack(self) -> bytes:
         return struct.pack(
-            f'<I B B H {self.name_len}s',
+            f'<I B B H {self.filename.name_len}s',
             self.user_id,
             self.version,
             self.op,
-            self.name_len,
-            self.filename.encode('utf-8')
+            self.filename.name_len,
+            self.filename.filename.encode('utf-8')
         )
 
 class RequestList(_RequestBase):
@@ -107,12 +113,12 @@ class RequestSave(_RequestWithFileName):
         self.payload = Payload(len(file_content), file_content)
 
     def pack(self) -> bytes:
-        filename_bytes = self.filename.encode('utf-8')
+        filename_bytes = self.filename.filename.encode('utf-8')
         return struct.pack(
             f'<I B B H {len(filename_bytes)}s I {len(self.payload.payload)}s',
             self.user_id,
             self.version,
-            Op.SAVE.value,
+            self.op,
             len(filename_bytes),
             filename_bytes,
             len(self.payload.payload),
@@ -142,12 +148,10 @@ class ResponseErrorNoClient(_ResponseBase):
 class _ResponseWithFileName(_ResponseBase):
     def __init__(self, version: int, status: Status, name_len: int, filename: str):
         super().__init__(version, status)
-
-        self.name_len = name_len
-        self.filename = filename
+        self.filename = Filename(name_len, filename)
     
     def __str__(self) -> str:
-        return super().__str__() + f"\nName length: {self.name_len}\nFilename: {self.filename}"
+        return super().__str__() + f"\nName length: {self.filename.name_len}\nFilename: {self.filename.filename}"
 
 class ResponseSuccessSave(_ResponseWithFileName):
     def __init__(self, version: int, name_len: int, filename: str):
@@ -160,12 +164,10 @@ class ResponseErrorNoFile(_ResponseWithFileName):
 class _ResponseWithFileNameAndPayload(_ResponseWithFileName):
     def __init__(self, version: int, status: Status, name_len: int, filename: str, payload: Payload):
         super().__init__(version, status, name_len, filename)
-        validate_range("payload_size", payload.size, "uint32_t")
-        
-        self.payload = payload
+        self.payload = Payload(payload.size, payload.payload)
     
     def __str__(self) -> str:
-        return f"Version: {self.version}\nStatus: {self.status}\nName length: {self.name_len}\nFilename: {self.filename}\nPayload size: {self.payload.size}"
+        return f"Version: {self.version}\nStatus: {self.status}\nName length: {self.filename.name_len}\nFilename: {self.filename.filename}\nPayload size: {self.payload.size}"
 
 class ResponseSuccessRestore(_ResponseWithFileNameAndPayload):
     def __init__(self, version: int, name_len: int, filename: str, payload: Payload):
@@ -234,9 +236,7 @@ class Client:
     def send_request(self, request: Request):
         my_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
         my_socket.connect((self.ip_address, self.port))
-        b = self.pack_request(request)
-        # print(binascii.hexlify(b))
-        my_socket.send(b)
+        my_socket.send(request.pack())
 
         data = b""
         while True:
@@ -249,16 +249,6 @@ class Client:
         print(response, '\n\n')
 
         my_socket.close()
-
-    # TODO: I don't think we need this method
-    def pack_request(self, request: Request) -> bytes:
-        # Convert the filename to bytes
-        # filename_bytes = request.filename.encode('utf-8')
-
-        # validate_range("filename length", len(filename_bytes), "uint16_t")
-        # validate_range("payload size", len(request.payload.payload), "uint32_t")
-
-        return request.pack()
 
     def unpack_response(self, data: bytes) -> Response:
         if len(data) < 3:
