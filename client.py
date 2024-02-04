@@ -234,10 +234,12 @@ class Client:
         self.port = port
 
     def send_request(self, request: Request) -> None:
+        # send request
         my_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
         my_socket.connect((self.ip_address, self.port))
         my_socket.send(request.pack())
 
+        # receive response
         data = b""
         while True:
             part = my_socket.recv(1024)
@@ -245,10 +247,15 @@ class Client:
                 break 
             data += part
 
+        # handle response
         response = self.unpack_response(data)
-        print(response, '\n\n')
+        self.handle_response(response)
 
+        # bye
         my_socket.close()
+
+    def handle_response(self, response: Response) -> None:
+        print(response, '\n\n')
 
     def unpack_response(self, data: bytes) -> Response:
         if len(data) < 3:
