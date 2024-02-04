@@ -830,6 +830,7 @@ namespace
 
     auto &[user_id, version, op] = *user_id_and_version_and_op;
 
+    // Interpret each request type according to the op
     if (op == Op::list)
     {
       return std::make_unique<RequestList>(user_id, version);
