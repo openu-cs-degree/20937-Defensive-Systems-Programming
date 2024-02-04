@@ -1,12 +1,44 @@
-import random
-from typing import Tuple, List, Literal
-import string
-import socket
-from enum import Enum
-import struct
-from abc import ABC
+"""
+File: client.py
+Author: Yehonatan Simian
+Date: January 2024
 
-VERSION = 3
++-----------------------------------------------------------------------------------+
+|                      Defensive System Programming - Maman 14                      |
+|                                                                                   |
+|       "Always try to be nice, but never fail to be kind." - The 12th Doctor       |
++-----------------------------------------------------------------------------------+
+
+Description:
+This module is a client that can request a compatible server to backup files and retrieve them later.
+The protocol is over TCP and the data is sent in little endian format.
+
+The client is capable of sending the following requests:
+- Save a file
+- Restore a file
+- Delete a file
+- List all files
+
+The server can respond with the following statuses:
+- Success: Restore
+- Success: List
+- Success: Save / Delete
+- Error: No such file
+- Error: No such client
+- Error: General error
+
+Copyright: All rights reserved (c) Yehonatan Simian 2024
+"""
+
+from typing import Tuple, List, Literal
+from enum import Enum
+from abc import ABC
+import random
+import socket
+import string
+import struct
+
+VERSION = 4
 
 class Op(Enum):
     SAVE = 100
