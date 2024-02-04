@@ -47,9 +47,9 @@ def validate_status(status: Status) -> None:
 # common classes
     
 class Filename:
-    def __init__(self, name_len: int, filename: str):
-        validate_range("name_len", name_len, "uint16_t")
-        self.name_len = name_len
+    def __init__(self, filename: str):
+        validate_range("name_len", len(filename), "uint16_t")
+        self.name_len = len(filename)
         self.filename = filename
 
 class Payload:
@@ -83,7 +83,7 @@ Request = _RequestBase
 class _RequestWithFileName(_RequestBase):
     def __init__(self, user_id: int, version: int, op: Op, filename: str):
         super().__init__(user_id, version, op)
-        self.filename = Filename(len(filename), filename)
+        self.filename = Filename(filename)
     
     def pack(self) -> bytes:
         return struct.pack(
@@ -146,36 +146,36 @@ class ResponseErrorNoClient(_ResponseBase):
         super().__init__(version, Status.ERROR_NO_CLIENT)
 
 class _ResponseWithFileName(_ResponseBase):
-    def __init__(self, version: int, status: Status, name_len: int, filename: str):
+    def __init__(self, version: int, status: Status, filename: Filename):
         super().__init__(version, status)
-        self.filename = Filename(name_len, filename)
+        self.filename = filename
     
     def __str__(self) -> str:
         return super().__str__() + f"\nName length: {self.filename.name_len}\nFilename: {self.filename.filename}"
 
 class ResponseSuccessSave(_ResponseWithFileName):
-    def __init__(self, version: int, name_len: int, filename: str):
-        super().__init__(version, Status.SUCCESS_SAVE, name_len, filename)
+    def __init__(self, version: int, filename: Filename):
+        super().__init__(version, Status.SUCCESS_SAVE, filename)
 
 class ResponseErrorNoFile(_ResponseWithFileName):
-    def __init__(self, version: int, name_len: int, filename: str):
-        super().__init__(version, Status.ERROR_NO_FILE, name_len, filename)
+    def __init__(self, version: int, filename: Filename):
+        super().__init__(version, Status.ERROR_NO_FILE, filename)
 
 class _ResponseWithFileNameAndPayload(_ResponseWithFileName):
-    def __init__(self, version: int, status: Status, name_len: int, filename: str, payload: Payload):
-        super().__init__(version, status, name_len, filename)
-        self.payload = Payload(payload.size, payload.payload)
+    def __init__(self, version: int, status: Status, filename: Filename, payload: Payload):
+        super().__init__(version, status, filename)
+        self.payload = payload
     
     def __str__(self) -> str:
         return f"Version: {self.version}\nStatus: {self.status}\nName length: {self.filename.name_len}\nFilename: {self.filename.filename}\nPayload size: {self.payload.size}"
 
 class ResponseSuccessRestore(_ResponseWithFileNameAndPayload):
-    def __init__(self, version: int, name_len: int, filename: str, payload: Payload):
-        super().__init__(version, Status.SUCCESS_RESTORE, name_len, filename, payload)
+    def __init__(self, version: int, filename: Filename, payload: Payload):
+        super().__init__(version, Status.SUCCESS_RESTORE, filename, payload)
 
 class ResponseSuccessList(_ResponseWithFileNameAndPayload):
-    def __init__(self, version: int, name_len: int, filename: str, payload: Payload):
-        super().__init__(version, Status.SUCCESS_LIST, name_len, filename, payload)
+    def __init__(self, version: int, filename: Filename, payload: Payload):
+        super().__init__(version, Status.SUCCESS_LIST, filename, payload)
 
 class FileHandler:
     SERVER_INFO_FILE = "server.info"
@@ -233,7 +233,7 @@ class Client:
         self.ip_address = ip_address
         self.port = port
 
-    def send_request(self, request: Request):
+    def send_request(self, request: Request) -> None:
         my_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
         my_socket.connect((self.ip_address, self.port))
         my_socket.send(request.pack())
@@ -270,34 +270,32 @@ class Client:
         
         # Unpack the name_len and filename
         name_len = struct.unpack('<H', data[3:5])[0]
-        validate_range("name_len", name_len, "uint16_t")
         filename_start = 5
         filename_end = filename_start + name_len
         filename = data[filename_start:filename_end].decode('ascii')
         if len(filename) != name_len:
             raise ValueError(f"filename length ({len(filename)}) does not match name_len ({name_len}).")
+        filename_obj = Filename(filename)
 
         if status == Status.SUCCESS_SAVE:
-            return ResponseSuccessSave(version, name_len, filename)
+            return ResponseSuccessSave(version, filename_obj)
         elif status == Status.ERROR_NO_FILE:
-            return ResponseErrorNoFile(version, name_len, filename)
+            return ResponseErrorNoFile(version, filename_obj)
         
         if len(data) < filename_end + 4:
             raise Exception(f"Response too short; got {len(data)} bytes but expected at least {filename_end + 4}")
 
         # Unpack the payload
         payload_size = struct.unpack('<I', data[filename_end:filename_end+4])[0]
-        validate_range("payload_size", payload_size, "uint32_t")
-
         payload_start = filename_end + 4
         payload_end = payload_start + payload_size
         payload = data[payload_start:payload_end]
         payload_obj = Payload(payload_size, payload)
 
         if status == Status.SUCCESS_RESTORE:
-            return ResponseSuccessRestore(version, name_len, filename, payload_obj)
+            return ResponseSuccessRestore(version, filename_obj, payload_obj)
         elif status == Status.SUCCESS_LIST:
-            return ResponseSuccessList(version, name_len, filename, payload_obj)
+            return ResponseSuccessList(version, filename_obj, payload_obj)
         
         raise Exception(f"Invalid status: {status}")
 
