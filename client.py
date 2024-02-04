@@ -196,13 +196,15 @@ class FileHandler:
         self.server_info_file = self.SERVER_INFO_FILE
         self.backup_info_file = self.BACKUP_INFO_FILE
 
-    def validate_ip(self, ip: str) -> None:
+    @staticmethod
+    def validate_ip(ip: str) -> None:
         try:
             socket.inet_aton(ip)
         except socket.error:
             raise ValueError("Invalid IP address.")
 
-    def validate_port(self, port: str) -> None:
+    @staticmethod
+    def validate_port(port: str) -> None:
         if not 0 <= int(port) <= 65535:
             raise ValueError("Invalid port number.")
 
