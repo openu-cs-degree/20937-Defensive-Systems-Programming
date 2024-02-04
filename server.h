@@ -474,7 +474,7 @@ namespace
     RequestWithPayload(RequestWithPayload &&) = default;
     RequestWithPayload &operator=(RequestWithPayload &&) = default;
 
-    virtual ~RequestWithPayload() = default;
+    ~RequestWithPayload() = default;
 
     void print(std::ostream &os) const override
     {
@@ -574,7 +574,7 @@ namespace
     ResponseWithPayload(ResponseWithPayload &&) = default;
     ResponseWithPayload &operator=(ResponseWithPayload &&) = default;
 
-    virtual ~ResponseWithPayload() = default;
+    ~ResponseWithPayload() = default;
 
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const override
     {
