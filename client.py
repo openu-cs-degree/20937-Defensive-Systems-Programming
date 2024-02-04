@@ -201,8 +201,6 @@ class FileHandler:
                 port = int(port)
         except FileNotFoundError:
             raise Exception(f"{self.server_info_file} file not found.")
-        except ValueError as e: 
-            raise Exception(f"An error occurred: {str(e)}") # TODO: this raise is redundant?
         except Exception as e:
             raise Exception(f"An error occurred: {str(e)}")
         return ip_address, port
