@@ -290,6 +290,8 @@ class Client:
         payload_start = filename_end + 4
         payload_end = payload_start + payload_size
         payload = data[payload_start:payload_end]
+        if len(payload) != payload_size:
+            raise ValueError(f"payload size ({len(payload)}) does not match payload_size ({payload_size}).")
         payload_obj = Payload(payload_size, payload)
 
         if status == Status.SUCCESS_RESTORE:
