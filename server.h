@@ -70,15 +70,15 @@
 // +----------------------------------------------------------------------------------+
 // | Inlcudes: Standard Library and Boost                                             |
 // +----------------------------------------------------------------------------------+
-#include <iostream>
-#include <thread>
-#include <optional>
-#include <filesystem>
-#include <fstream>
 #include <string_view>
-#include <cstdint>
-#include <memory>
+#include <filesystem>
 #include <algorithm>
+#include <iostream>
+#include <optional>
+#include <fstream>
+#include <cstdint>
+#include <thread>
+#include <memory>
 
 #pragma warning(push)
 #pragma warning(disable : 6001 6031 6101 6255 6258 6313 6387)
