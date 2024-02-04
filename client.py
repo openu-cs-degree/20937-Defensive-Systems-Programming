@@ -6,7 +6,7 @@ from enum import Enum
 import struct
 from abc import ABC
 
-VERSION = 3
+VERSION = 4
 
 class Op(Enum):
     SAVE = 100
