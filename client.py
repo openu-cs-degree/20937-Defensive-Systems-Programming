@@ -325,7 +325,8 @@ def main():
     reader = FileHandler()
     ip_address, port = reader.read_server_info() # step 2
     filenames = reader.read_backup_info() # step 3
-    # TODO: make sure len(filenames) >= 2
+    if len(filenames) < 2:
+        raise Exception("At least two files are required to run the client.")
 
     client = Client(ip_address, port)
 
