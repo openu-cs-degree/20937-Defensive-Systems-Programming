@@ -308,9 +308,6 @@ namespace
     Filename &operator=(Filename &&) = default;
     ~Filename() = default;
 
-    Filename(uint16_t name_len, std::unique_ptr<char[]> filename)
-        : name_len(name_len), content(std::move(filename)) {}
-
     explicit Filename(const std::string_view &filename)
         : name_len(static_cast<uint16_t>(filename.size())), content(std::make_unique<char[]>(name_len))
     {
@@ -336,6 +333,12 @@ namespace
       Filename filename;
 
       SOCKET_READ_OR_RETURN(&filename.name_len, sizeof(filename.name_len), std::nullopt, "Failed to read name_len: ", error.message());
+
+      if (filename.name_len == 0)
+      {
+        log("name_len can't be 0");
+        return std::nullopt;
+      }
 
       filename.content = std::make_unique<char[]>(filename.name_len);
 
@@ -880,6 +883,19 @@ namespace
     return true;
   }
 
+  void send_general_error(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+  {
+    ResponseErrorGeneral response{};
+    if (!response.write_to_socket(socket, error))
+    {
+      log("Failed to send general response: ", error.message());
+    }
+    else
+    {
+      log("General error sent successfully :D");
+    }
+  }
+
   void handle_client(boost::asio::ip::tcp::socket socket)
   {
     boost::system::error_code error;
@@ -891,6 +907,8 @@ namespace
       if (!request)
       {
         log("Request reading failed!");
+        send_general_error(socket, error);
+        clear_socket(socket, error);
         return;
       }
       log(*request);
@@ -901,6 +919,7 @@ namespace
         if (!clear_socket(socket, error))
         {
           log("Failed to discard extra data: ", error.message());
+          send_general_error(socket, error);
           return;
         }
       }
@@ -910,6 +929,7 @@ namespace
       if (!response)
       {
         log("Request processing failed!");
+        send_general_error(socket, error);
         return;
       }
       log(*response);
@@ -918,18 +938,15 @@ namespace
       if (!response->write_to_socket(socket, error))
       {
         log("Failed to send response: ", error.message());
+        send_general_error(socket, error);
         return;
       }
       log("Response sent successfully :D");
     }
     catch ([[maybe_unused]] std::exception &e)
     {
-      ResponseErrorGeneral response;
-      response.write_to_socket(socket, error);
-      if (error)
-      {
-        log("Terminating client because of the following exception: ", e.what());
-      }
+      log("Exception caught: ", e.what());
+      send_general_error(socket, error);
     }
   }
 } // anonymous namespace
