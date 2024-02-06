@@ -6,6 +6,10 @@
 #include <vector>
 #include <array>
 
+#define _CRTDBG_MAP_ALLOC
+#include <stdlib.h>
+#include <crtdbg.h>
+
 /*
  * ~~~~~~~~~~~~~~~~~~~~~~~~~ Maman 14 - Server Test ~~~~~~~~~~~~~~~~~~~~~~~~~
  *
@@ -251,6 +255,7 @@ TEST_F(ServerTest, FuzzedRequests)
 
 int main(int argc, char **argv)
 {
+  _CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
