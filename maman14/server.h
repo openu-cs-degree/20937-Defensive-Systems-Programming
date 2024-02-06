@@ -40,6 +40,7 @@
   - Version 3: Support partial requests (omit redundant data).
   - Version 4: First production version. Full error handling, full request processing.
   - Version 5: clang-tidy fixes and code cleanup.
+  - Version 6: Added tests, fixed small bugs.
 
   @section TODO ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -51,7 +52,6 @@
       This solution does not support clients sending few requests on the same socket.
   - Create a thread pool. It won't prevent DDoS attacks, but at least it will prevent
     clients from opening too many threads and crashing the server.
-  - Create tests for the server.
 
   @section COMPILATION ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -134,7 +134,7 @@ namespace
 // +----------------------------------------------------------------------------------+
 namespace maman14
 {
-  static constexpr inline uint8_t server_version = 5;
+  static constexpr inline uint8_t server_version = 6;
   static constexpr inline std::string_view server_dir_name = "my_server";
   static void start_server_on_port(uint16_t port);
 } // namespace maman14
