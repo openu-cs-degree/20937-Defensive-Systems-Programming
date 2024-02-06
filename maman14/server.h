@@ -793,7 +793,7 @@ namespace
                     std::filesystem::directory_iterator(),
                     [&](const auto &entry)
                     {
-                      if (auto filename = entry.path().filename(); filename != ignored_filename)
+                      if (auto filename = entry.path().filename().string(); filename != ignored_filename)
                       {
                         oss << filename << '\n';
                       }
