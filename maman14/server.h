@@ -896,52 +896,57 @@ namespace
     }
   }
 
+  bool handle_request(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+  {
+    log("Receiving request :)");
+    auto request = read_request(socket, error);
+    if (!request)
+    {
+      log("Request reading failed!");
+      clear_socket(socket, error);
+      return false;
+    }
+    log(*request);
+
+    if (socket.available())
+    {
+      log("Socket had redundant data. Discarding it.");
+      if (!clear_socket(socket, error))
+      {
+        log("Failed to discard extra data: ", error.message());
+      }
+    }
+
+    log("Request received. Generating response:");
+    auto response = request->process();
+    if (!response)
+    {
+      log("Request processing failed!");
+      return false;
+    }
+    log(*response);
+
+    log("Sending response:");
+    if (!response->write_to_socket(socket, error))
+    {
+      log("Failed to send response: ", error.message());
+      return false;
+    }
+    log("Response sent successfully :D");
+
+    return true;
+  }
+
   void handle_client(boost::asio::ip::tcp::socket socket)
   {
     boost::system::error_code error;
 
     try
     {
-      log("Receiving request :)");
-      auto request = read_request(socket, error);
-      if (!request)
+      if (!handle_request(socket, error))
       {
-        log("Request reading failed!");
         send_general_error(socket, error);
-        clear_socket(socket, error);
-        return;
       }
-      log(*request);
-
-      if (socket.available())
-      {
-        log("Socket had redundant data. Discarding it.");
-        if (!clear_socket(socket, error))
-        {
-          log("Failed to discard extra data: ", error.message());
-          send_general_error(socket, error);
-          return;
-        }
-      }
-
-      log("Request received. Generating response:");
-      auto response = request->process();
-      if (!response)
-      {
-        log("Request processing failed!");
-        send_general_error(socket, error);
-        return;
-      }
-      log(*response);
-
-      log("Sending response:");
-      if (!response->write_to_socket(socket, error))
-      {
-        log("Failed to send response: ", error.message());
-        send_general_error(socket, error);
-        return;
-      }
-      log("Response sent successfully :D");
     }
     catch ([[maybe_unused]] std::exception &e)
     {
