@@ -24,7 +24,7 @@
   - CRC invalid
   - CRC invalid for the 4th time
 
-  The server can respond with the following statuses:
+  The server can respond with the following responses:
   - Sign up succeeded
   - Sign up failed
   - Public key received, senging AES key
@@ -122,12 +122,35 @@ namespace
 // +----------------------------------------------------------------------------------+
 // | Interface: user exposed functions and variables                                  |
 // +----------------------------------------------------------------------------------+
-namespace maman14
+namespace maman15
 {
-  static constexpr inline uint8_t server_version = 5;
-  static constexpr inline std::string_view server_dir_name = "my_server";
-  static void start_server_on_port(uint16_t port);
-} // namespace maman14
+  class Client
+  {
+  public:
+    static constexpr inline uint32_t version = 3;
+
+  private:
+    static constexpr inline std::string_view instructions_file_name = "transfer.info";
+    static constexpr inline std::string_view private_key_file_name = "priv.key";
+    static constexpr inline std::string_view identifier_file_name = "me.info";
+
+    using tcp = boost::asio::ip::tcp;
+
+  public:
+    Client();
+
+    Client(const Client &) = delete;
+    Client &operator=(const Client &) = delete;
+    Client(Client &&) = delete;
+    Client &operator=(Client &&) = delete;
+    ~Client() = default;
+
+    bool register_to_server();
+    bool send_public_key();
+    bool send_file(const std::filesystem::path &file_path);
+    bool validate_crc();
+  };
+} // namespace maman15
 #pragma endregion
 
 #pragma region enums
@@ -136,31 +159,40 @@ namespace maman14
 // +----------------------------------------------------------------------------------+
 namespace
 {
-  enum class Op : uint8_t
+  enum class RequestCode : uint16_t
   {
-    save = 100,
-    restore = 200, // no size or payload
-    remove = 201,  // no size or payload
-    list = 202,    // no size, payload, name_len or filename
+    sign_up = 1025,
+    send_public_key = 1026,
+    sign_in = 1027,
+    send_file = 1028,
+    crc_valid = 1029,
+    crc_invalid = 1030,
+    crc_invalid_4th_time = 1031,
   };
 
-  auto is_valid_op(uint8_t value) -> bool
+  enum class ResponseCode : uint16_t
   {
-    return value == static_cast<uint8_t>(Op::save) ||
-           value == static_cast<uint8_t>(Op::restore) ||
-           value == static_cast<uint8_t>(Op::remove) ||
-           value == static_cast<uint8_t>(Op::list);
+    sign_up_succeeded = 1600,
+    sign_up_failed = 1601,
+    public_key_received = 1602,
+    crc_valid = 1603,
+    message_received = 1604,
+    sign_in_allowed = 1605, // same table as 1602
+    sign_in_rejected = 1606,
+    general_error = 1607,
+  };
+
+  [[nodiscard]] auto is_valid_response_code(uint16_t value) -> bool
+  {
+    return value == static_cast<uint16_t>(ResponseCode::sign_up_succeeded) ||
+           value == static_cast<uint16_t>(ResponseCode::sign_up_failed) ||
+           value == static_cast<uint16_t>(ResponseCode::public_key_received) ||
+           value == static_cast<uint16_t>(ResponseCode::crc_valid) ||
+           value == static_cast<uint16_t>(ResponseCode::message_received) ||
+           value == static_cast<uint16_t>(ResponseCode::sign_in_allowed) ||
+           value == static_cast<uint16_t>(ResponseCode::sign_in_rejected) ||
+           value == static_cast<uint16_t>(ResponseCode::general_error);
   }
-
-  enum class Status : uint16_t
-  {
-    success_restore = 210,
-    success_list = 211,
-    success_save = 212,     // no size or payload
-    error_no_file = 1001,   // no size or payload
-    error_no_client = 1002, // only version and status
-    error_general = 1003,   // only version and status
-  };
 } // anonymous namespace
 #pragma endregion
 
@@ -179,8 +211,7 @@ namespace
 
   class Payload
   {
-    uint32_t size;
-    std::unique_ptr<uint8_t[]> content;
+    std::vector<uint8_t> content;
 
   private:
     Payload() = default;
@@ -192,14 +223,11 @@ namespace
     Payload &operator=(Payload &&) = default;
     ~Payload() = default;
 
-    Payload(uint32_t size, std::unique_ptr<uint8_t[]> content)
-        : size(size), content(std::move(content)){};
+    Payload(std::vector<uint8_t> content)
+        : content(std::move(content)){};
 
     explicit Payload(const std::string &content)
-        : size(static_cast<uint32_t>(content.size())), content(std::make_unique<uint8_t[]>(size))
-    {
-      std::copy(content.begin(), content.end(), this->content.get());
-    }
+        : content(content.begin(), content.end()){};
 
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
@@ -298,9 +326,6 @@ namespace
     Filename &operator=(Filename &&) = default;
     ~Filename() = default;
 
-    Filename(uint16_t name_len, std::unique_ptr<char[]> filename)
-        : name_len(name_len), content(std::move(filename)) {}
-
     explicit Filename(const std::string_view &filename)
         : name_len(static_cast<uint16_t>(filename.size())), content(std::make_unique<char[]>(name_len))
     {
@@ -326,6 +351,12 @@ namespace
       Filename filename;
 
       SOCKET_READ_OR_RETURN(&filename.name_len, sizeof(filename.name_len), std::nullopt, "Failed to read name_len: ", error.message());
+
+      if (filename.name_len == 0)
+      {
+        log("name_len can't be 0");
+        return std::nullopt;
+      }
 
       filename.content = std::make_unique<char[]>(filename.name_len);
 
@@ -355,21 +386,33 @@ namespace
     }
   };
 
+  struct ClientID
+  {
+    uint64_t lower;
+    uint64_t upper;
+    friend std::ostream &operator<<(std::ostream &os, const ClientID &client_id)
+    {
+      os << "client_id: " << client_id.upper << client_id.lower;
+      return os;
+    }
+  };
+
   // forward declare Response so that it can be used in Request::process()
 
   class Response;
 
-  // Requests base classes
+  // Requests base class
 
   class Request
   {
   protected:
-    const uint32_t user_id;
+    const ClientID client_id;
     const uint8_t version;
-    const Op op;
+    const RequestCode code;
+    const uint32_t payload_size;
 
-    Request(uint32_t user_id, uint8_t version, Op op)
-        : user_id(user_id), version(version), op(op){};
+    Request(ClientID client_id, RequestCode code, uint32_t payload_size)
+        : client_id(client_id), version(maman15::Client::version), code(code), payload_size(payload_size){};
 
   public:
     Request(const Request &) = delete;
@@ -379,39 +422,18 @@ namespace
 
     virtual ~Request() = default;
 
-    static const std::optional<std::tuple<uint32_t, uint8_t, Op>> read_user_id_and_version_and_op(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+    virtual const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
-      struct RequestData
-      {
-        uint32_t user_id;
-        uint8_t version;
-        Op op;
-      };
-      RequestData data;
+      SOCKET_WRITE_OR_RETURN(&this->version, sizeof(version) + sizeof(code), false, "Failed to write response: ", error.message());
 
-      SOCKET_READ_OR_RETURN(&data, sizeof(data), std::nullopt, "Failed to read request: ", error.message());
-
-      if (!is_valid_op(static_cast<uint8_t>(data.op)))
-      {
-        log("Invalid op: ", static_cast<uint16_t>(data.op));
-        return std::nullopt;
-      }
-
-      return std::make_tuple(data.user_id, data.version, data.op);
+      return true;
     }
-
-    const std::filesystem::path get_user_dir_path() const
-    {
-      return std::filesystem::path("C:\\") / maman14::server_dir_name / std::to_string(user_id);
-    }
-
-    virtual std::unique_ptr<Response> process() = 0; // one day son, I will const process() as well. one day.
 
     virtual void print(std::ostream &os) const
     {
-      os << "user_id: " << user_id << '\n';
+      os << client_id << '\n';
       os << "version: " << static_cast<uint16_t>(version) << '\n';
-      os << "op: " << static_cast<uint16_t>(op) << '\n';
+      os << "code: " << static_cast<uint16_t>(code) << '\n';
     }
 
     friend std::ostream &operator<<(std::ostream &os, const Request &request)
@@ -421,67 +443,17 @@ namespace
     }
   };
 
-  class RequestWithFileName : public Request
-  {
-  protected:
-    Filename filename; // TODO: figure why I can't const it
-
-    RequestWithFileName(uint32_t user_id, uint8_t version, Op op, Filename filename)
-        : Request(user_id, version, op), filename(std::move(filename)){};
-
-  public:
-    RequestWithFileName(const RequestWithFileName &) = delete;
-    RequestWithFileName &operator=(const RequestWithFileName &) = delete;
-    RequestWithFileName(RequestWithFileName &&) = default;
-    RequestWithFileName &operator=(RequestWithFileName &&) = default;
-
-    virtual ~RequestWithFileName() = default;
-
-    const std::filesystem::path get_user_file_path(const std::filesystem::path &user_dir_path) const
-    {
-      return user_dir_path / filename.get_name();
-    }
-
-    virtual void print(std::ostream &os) const override
-    {
-      Request::print(os);
-      os << filename << '\n';
-    }
-  };
-
-  class RequestWithPayload : public RequestWithFileName
-  {
-  protected:
-    const Payload payload;
-
-    RequestWithPayload(uint32_t user_id, uint8_t version, Op op, Filename filename, Payload payload)
-        : RequestWithFileName(user_id, version, op, std::move(filename)), payload(std::move(payload)){};
-
-  public:
-    RequestWithPayload(const RequestWithPayload &) = delete;
-    RequestWithPayload &operator=(const RequestWithPayload &) = delete;
-    RequestWithPayload(RequestWithPayload &&) = default;
-    RequestWithPayload &operator=(RequestWithPayload &&) = default;
-
-    ~RequestWithPayload() = default;
-
-    void print(std::ostream &os) const override
-    {
-      RequestWithFileName::print(os);
-      os << payload << '\n';
-    }
-  };
-
-  // Response base classes
+  // Response base class
 
   class Response
   {
   protected:
-    const uint8_t version;
-    const Status status;
+    const uint8_t server_version;
+    const ResponseCode code;
+    const uint32_t payload_size;
 
-    Response(uint8_t version, Status status)
-        : version(version), status(status){};
+    Response(uint8_t server_version, ResponseCode code, uint32_t payload_size)
+        : server_version(server_version), code(code), payload_size(payload_size){};
 
   public:
     Response(const Response &) = delete;
@@ -491,17 +463,32 @@ namespace
 
     virtual ~Response() = default;
 
-    virtual const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
+    static const std::optional<Response> read_response_header(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
     {
-      SOCKET_WRITE_OR_RETURN(&this->version, sizeof(version) + sizeof(status), false, "Failed to write response: ", error.message());
+      struct ResponseData
+      {
+        uint8_t server_version;
+        ResponseCode code;
+        uint32_t payload_size;
+      };
+      ResponseData data;
 
-      return true;
+      SOCKET_READ_OR_RETURN(&data, sizeof(data), std::nullopt, "Failed to read request: ", error.message());
+
+      if (!is_valid_response_code(static_cast<uint16_t>(data.code)))
+      {
+        log("Invalid code: ", static_cast<uint16_t>(data.code));
+        return std::nullopt;
+      }
+
+      /// TODO: std::tuple?
+      return Response(data.server_version, data.code, data.payload_size);
     }
 
     virtual void print(std::ostream &os) const
     {
-      os << "version: " << static_cast<uint16_t>(version) << '\n';
-      os << "status: " << static_cast<uint16_t>(status) << '\n';
+      os << "version: " << static_cast<uint16_t>(server_version) << '\n';
+      os << "code: " << static_cast<uint16_t>(code) << '\n';
     }
 
     friend std::ostream &operator<<(std::ostream &os, const Response &response)
@@ -511,320 +498,194 @@ namespace
     }
   };
 
-  class ResponseWithFileName : public Response
-  {
-  protected:
-    const Filename filename;
-
-    ResponseWithFileName(uint8_t version, Status status, Filename filename)
-        : Response(version, status), filename(std::move(filename)){};
-
-  public:
-    ResponseWithFileName(const ResponseWithFileName &) = delete;
-    ResponseWithFileName &operator=(const ResponseWithFileName &) = delete;
-    ResponseWithFileName(ResponseWithFileName &&) = default;
-    ResponseWithFileName &operator=(ResponseWithFileName &&) = default;
-
-    virtual ~ResponseWithFileName() = default;
-
-    virtual const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const override
-    {
-      if (!Response::write_to_socket(socket, error))
-      {
-        return false;
-      }
-
-      if (!filename.write_to_socket(socket, error))
-      {
-        return false;
-      }
-
-      return true;
-    }
-
-    virtual void print(std::ostream &os) const override
-    {
-      Response::print(os);
-      os << filename << '\n';
-    }
-  };
-
-  class ResponseWithPayload : public ResponseWithFileName
-  {
-  protected:
-    const Payload payload;
-
-    ResponseWithPayload(uint8_t version, Status status, Filename filename, Payload payload)
-        : ResponseWithFileName(version, status, std::move(filename)), payload(std::move(payload)){};
-
-  public:
-    ResponseWithPayload(const ResponseWithPayload &) = delete;
-    ResponseWithPayload &operator=(const ResponseWithPayload &) = delete;
-    ResponseWithPayload(ResponseWithPayload &&) = default;
-    ResponseWithPayload &operator=(ResponseWithPayload &&) = default;
-
-    ~ResponseWithPayload() = default;
-
-    const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const override
-    {
-      if (!ResponseWithFileName::write_to_socket(socket, error))
-      {
-        return false;
-      }
-
-      if (!payload.write_to_socket(socket, error))
-      {
-        return false;
-      }
-
-      return true;
-    };
-
-    void print(std::ostream &os) const override
-    {
-      ResponseWithFileName::print(os);
-      os << payload << '\n';
-    }
-  };
-
   // Response concrete classes (final, non-abstract)
 
-  class ResponseSuccessRestore final : public ResponseWithPayload
+  class ResponseSuccessSignUp final : public Response
   {
+    const ClientID client_id;
+    static constexpr uint32_t payload_size = sizeof(client_id);
+
   public:
-    explicit ResponseSuccessRestore(Filename filename, Payload payload)
-        : ResponseWithPayload(maman14::server_version, Status::success_restore, std::move(filename), std::move(payload)){};
+    explicit ResponseSuccessSignUp(uint8_t server_version, ClientID client_id)
+        : Response(server_version, ResponseCode::sign_up_succeeded, payload_size), client_id(client_id){};
   };
 
-  class ResponseSuccessList final : public ResponseWithPayload
+  class ResponseFailureSignUp final : public Response
   {
+    static constexpr uint32_t payload_size = 0;
+
   public:
-    explicit ResponseSuccessList(Filename filename, Payload payload)
-        : ResponseWithPayload(maman14::server_version, Status::success_list, std::move(filename), std::move(payload)){};
+    explicit ResponseFailureSignUp(uint8_t server_version)
+        : Response(server_version, ResponseCode::sign_up_failed, payload_size){};
   };
 
-  class ResponseSuccessSave final : public ResponseWithFileName
+  class ResponseSuccessPublicKey final : public Response
   {
+    ClientID client_id;
+    std::array<uint8_t, 256> aes_key; // TODO: replace with AES key class
+    static constexpr uint32_t payload_size = sizeof(client_id) + sizeof(aes_key);
+
   public:
-    explicit ResponseSuccessSave(Filename filename)
-        : ResponseWithFileName(maman14::server_version, Status::success_save, std::move(filename)){};
+    explicit ResponseSuccessPublicKey(uint8_t server_version, ClientID client_id, std::array<uint8_t, 256> aes_key)
+        : Response(server_version, ResponseCode::public_key_received, payload_size), client_id(client_id), aes_key(std::move(aes_key)){};
   };
 
-  class ResponseErrorNoFile final : public ResponseWithFileName
+  class ResponseSuccessCRCValid final : public Response
   {
+    ClientID client_id;
+    uint32_t content_size;
+    std::array<uint8_t, 255> filename; //  TODO: replace with Filename class
+    uint32_t ckcsum;
+    static constexpr uint32_t payload_size = sizeof(client_id) + sizeof(content_size) + sizeof(filename) + sizeof(ckcsum);
+
   public:
-    explicit ResponseErrorNoFile(Filename filename)
-        : ResponseWithFileName(maman14::server_version, Status::error_no_file, std::move(filename)){};
+    explicit ResponseSuccessCRCValid(uint8_t server_version, ClientID client_id, uint32_t content_size, std::array<uint8_t, 255> filename, uint32_t ckcsum)
+        : Response(server_version, ResponseCode::crc_valid, payload_size), client_id(client_id), content_size(content_size), filename(std::move(filename)), ckcsum(ckcsum){};
   };
 
-  class ResponseErrorNoClient final : public Response
+  class ResponseSuccessMessageReceived final : public Response
   {
+    ClientID client_id;
+    static constexpr uint32_t payload_size = sizeof(client_id);
+
   public:
-    explicit ResponseErrorNoClient()
-        : Response(maman14::server_version, Status::error_no_client){};
+    explicit ResponseSuccessMessageReceived(uint8_t server_version, ClientID client_id)
+        : Response(server_version, ResponseCode::message_received, payload_size), client_id(client_id){};
+  };
+
+  class ResponseSuccessSignInAllowed final : public Response
+  {
+    ClientID client_id;
+    std::array<uint8_t, 256> aes_key; // TODO: replace with AES key class, merge with ResponseSuccessPublicKey
+    static constexpr uint32_t payload_size = sizeof(client_id) + sizeof(aes_key);
+
+  public:
+    explicit ResponseSuccessSignInAllowed(uint8_t server_version, ClientID client_id, std::array<uint8_t, 256> aes_key)
+        : Response(server_version, ResponseCode::sign_in_allowed, payload_size), client_id(client_id), aes_key(std::move(aes_key)){};
+  };
+
+  class ResponseFailureSignInRejected final : public Response
+  {
+    ClientID client_id;
+    static constexpr uint32_t payload_size = sizeof(client_id);
+
+  public:
+    explicit ResponseFailureSignInRejected(uint8_t server_version, ClientID client_id)
+        : Response(server_version, ResponseCode::sign_in_rejected, payload_size), client_id(client_id){};
   };
 
   class ResponseErrorGeneral final : public Response
   {
+    static constexpr uint32_t payload_size = 0;
+
   public:
-    explicit ResponseErrorGeneral()
-        : Response(maman14::server_version, Status::error_general){};
+    explicit ResponseErrorGeneral(uint8_t server_version)
+        : Response(server_version, ResponseCode::general_error, payload_size){};
   };
 
   // Request concrete classs (final, non-abstract)
 
-  class RequestSave final : public RequestWithPayload
+  class RequestSignUp final : public Request
   {
+    std::array<uint8_t, 255> name; // TODO: replace with Name class
+    static constexpr uint32_t payload_size = sizeof(name);
+
   public:
-    explicit RequestSave(uint32_t user_id, uint8_t version, Filename filename, Payload payload)
-        : RequestWithPayload(user_id, version, Op::save, std::move(filename), std::move(payload)){};
-
-    std::unique_ptr<Response> process() override
-    {
-      auto dir_path = get_user_dir_path();
-
-      std::filesystem::create_directories(dir_path);
-
-      auto file_path = get_user_file_path(dir_path);
-      if (!payload.write_to_file(file_path))
-      {
-        return std::make_unique<ResponseErrorGeneral>();
-      }
-
-      return std::make_unique<ResponseSuccessSave>(std::move(filename));
-    }
+    explicit RequestSignUp(ClientID client_id, std::array<uint8_t, 255> name)
+        : Request(client_id, RequestCode::sign_up, payload_size), name(std::move(name)){};
   };
 
-  class RequestRestore final : public RequestWithFileName
+  class RequestSendPublicKey final : public Request
   {
+    std::array<uint8_t, 255> name;       // TODO: replace with Name class
+    std::array<uint8_t, 160> public_key; // TODO: replace with public key class
+    static constexpr uint32_t payload_size = sizeof(name) + sizeof(public_key);
+
   public:
-    explicit RequestRestore(uint32_t user_id, uint8_t version, Filename filename)
-        : RequestWithFileName(user_id, version, Op::restore, std::move(filename)){};
-
-    std::unique_ptr<Response> process() override
-    {
-      auto dir_path = get_user_dir_path();
-      if (!std::filesystem::exists(dir_path) || std::filesystem::is_empty(dir_path))
-      {
-        return std::make_unique<ResponseErrorNoClient>();
-      }
-
-      auto file_path = get_user_file_path(dir_path);
-      if (!std::filesystem::exists(file_path))
-      {
-        return std::make_unique<ResponseErrorNoFile>(std::move(filename));
-      }
-
-      auto payload = Payload::read_from_file(file_path);
-      if (!payload)
-      {
-        return std::make_unique<ResponseErrorNoFile>(std::move(filename));
-      }
-
-      return std::make_unique<ResponseSuccessRestore>(std::move(filename), std::move(payload.value()));
-    }
+    explicit RequestSendPublicKey(ClientID client_id, std::array<uint8_t, 255> name, std::array<uint8_t, 160> public_key)
+        : Request(client_id, RequestCode::send_public_key, payload_size), name(std::move(name)), public_key(std::move(public_key)){};
   };
 
-  class RequestDelete final : public RequestWithFileName
+  class RequestSignIn final : public Request
   {
+    std::array<uint8_t, 255> name; // TODO: replace with Name class
+    static constexpr uint32_t payload_size = sizeof(name);
+
   public:
-    explicit RequestDelete(uint32_t user_id, uint8_t version, Filename filename)
-        : RequestWithFileName(user_id, version, Op::remove, std::move(filename)){};
-
-    std::unique_ptr<Response> process() override
-    {
-      auto dir_path = get_user_dir_path();
-      if (!std::filesystem::exists(dir_path) || std::filesystem::is_empty(dir_path))
-      {
-        return std::make_unique<ResponseErrorNoClient>();
-      }
-
-      auto file_path = get_user_file_path(dir_path);
-      if (!std::filesystem::exists(file_path))
-      {
-        return std::make_unique<ResponseErrorNoFile>(std::move(filename));
-      }
-
-      if (std::error_code ec; !std::filesystem::remove(file_path, ec))
-      {
-        log("Failed to delete file: ", file_path);
-        return std::make_unique<ResponseErrorGeneral>();
-      }
-
-      return std::make_unique<ResponseSuccessSave>(std::move(filename));
-    }
+    explicit RequestSignIn(ClientID client_id, std::array<uint8_t, 255> name)
+        : Request(client_id, RequestCode::sign_in, payload_size), name(name){};
   };
 
-  class RequestList final : public Request
+  class RequestSendFile final : public Request
   {
+    uint32_t content_size;
+    uint32_t orig_file_size;
+    uint32_t packet_number_and_total_packets; // TODO: replace with Packet class
+    std::array<uint8_t, 255> filename;        // TODO: replace with Filename class
+    std::vector<uint8_t> content;
+    static constexpr uint32_t payload_size_without_content = sizeof(content_size) + sizeof(orig_file_size) + sizeof(packet_number_and_total_packets) + sizeof(filename);
+
   public:
-    explicit RequestList(uint32_t user_id, uint8_t version)
-        : Request(user_id, version, Op::list){};
+    explicit RequestSendFile(ClientID client_id, uint32_t content_size, uint32_t orig_file_size, uint32_t packet_number_and_total_packets, std::array<uint8_t, 255> filename, std::vector<uint8_t> content)
+        : Request(client_id, RequestCode::send_file, payload_size_without_content + content_size), content_size(content_size), orig_file_size(orig_file_size), packet_number_and_total_packets(packet_number_and_total_packets), filename(std::move(filename)), content(std::move(content)){};
+  };
 
-    std::unique_ptr<Response> process() override
-    {
-      std::filesystem::path user_dir_path = get_user_dir_path();
-      if (!std::filesystem::exists(user_dir_path) || std::filesystem::is_empty(user_dir_path))
-      {
-        return std::make_unique<ResponseErrorNoClient>();
-      }
+  class RequestCRCValid final : public Request
+  {
+    std::array<uint8_t, 255> filename; // TODO: replace with Filename class
+    static constexpr uint32_t payload_size = sizeof(filename);
 
-      const auto user_file_name = generate_random_file_name();
-      std::filesystem::path user_file_path = user_dir_path / user_file_name;
+  public:
+    explicit RequestCRCValid(ClientID client_id, std::array<uint8_t, 255> filename)
+        : Request(client_id, RequestCode::crc_valid, payload_size), filename(std::move(filename)){};
+  };
 
-      auto file = create_and_get_user_file(user_file_path);
-      if (!file)
-      {
-        return std::make_unique<ResponseErrorGeneral>();
-      }
+  class RequestCRCInvalid final : public Request
+  {
+    std::array<uint8_t, 255> filename; // TODO: replace with Filename class
+    static constexpr uint32_t payload_size = sizeof(filename);
 
-      auto payload = write_directory_to_file(user_dir_path, user_file_name, file.value());
-      if (!payload)
-      {
-        return std::make_unique<ResponseErrorGeneral>();
-      }
+  public:
+    explicit RequestCRCInvalid(ClientID client_id, std::array<uint8_t, 255> filename)
+        : Request(client_id, RequestCode::crc_invalid, payload_size), filename(std::move(filename)){};
+  };
 
-      return std::make_unique<ResponseSuccessList>(Filename(user_file_name), std::move(payload.value()));
-    }
+  class RequestCRCInvalid4thTime final : public Request
+  {
+    std::array<uint8_t, 255> filename; // TODO: replace with Filename class
+    static constexpr uint32_t payload_size = sizeof(filename);
 
-  private:
-    const std::string generate_random_file_name() const
-    {
-      static constexpr uint16_t length = 32;
-      auto generate_random_character = []() -> char
-      {
-        static constexpr std::string_view characters = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-        return characters[rand() % characters.size()];
-      };
-      std::string random_string(length, 0);
-      std::generate_n(random_string.begin(), length, generate_random_character);
-      return random_string;
-    }
-
-    std::optional<std::fstream> create_and_get_user_file(const std::filesystem::path &file_path) const
-    {
-      std::fstream file(file_path, std::ios::in | std::ios::out | std::ios::trunc);
-      if (!file)
-      {
-        log("Failed to create file: ", file_path);
-        return std::nullopt;
-      }
-
-      return file;
-    }
-
-    const std::optional<Payload> write_directory_to_file(const std::filesystem::path &src_path, const std::string_view &ignored_filename, std::fstream &dst_file) const
-    {
-      std::ostringstream oss;
-      std::for_each(std::filesystem::directory_iterator(src_path),
-                    std::filesystem::directory_iterator(),
-                    [&](const auto &entry)
-                    {
-                      if (auto filename = entry.path().filename(); filename != ignored_filename)
-                      {
-                        oss << filename << '\n';
-                      }
-                    });
-
-      std::string content = oss.str();
-      if (auto file_size = content.size(); file_size > std::numeric_limits<uint32_t>::max())
-      {
-        log("File size is too big: ", file_size);
-        return std::nullopt;
-      }
-
-      dst_file << content;
-
-      return Payload{content};
-    }
+  public:
+    explicit RequestCRCInvalid4thTime(ClientID client_id, std::array<uint8_t, 255> filename)
+        : Request(client_id, RequestCode::crc_invalid_4th_time, payload_size), filename(std::move(filename)){};
   };
 #pragma pack(pop)
 } // anonymous namespace
 #pragma endregion
 
-#pragma region implementation_server
+#pragma region implementation_client
 // +----------------------------------------------------------------------------------+
-// | Implementation of the server, which should not be protocol dependent             |
+// | Implementation of the slient, which should not be protocol dependent             |
 // +----------------------------------------------------------------------------------+
 namespace
 {
   std::unique_ptr<Request> read_request(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
   {
     // Read the common part of the request
-    auto user_id_and_version_and_op = Request::read_user_id_and_version_and_op(socket, error);
-    if (!user_id_and_version_and_op)
+    auto user_id_and_version_and_code = Request::read_user_id_and_version_and_code(socket, error);
+    if (!user_id_and_version_and_code)
     {
       return {};
     }
 
-    auto &[user_id, version, op] = *user_id_and_version_and_op;
+    auto &[user_id, version, code] = *user_id_and_version_and_code;
 
-    // Interpret each request type according to the op
-    if (op == Op::list)
+    // Interpret each request type according to the code
+    if (code == RequestCode::list)
     {
       return std::make_unique<RequestList>(user_id, version);
     }
-    if (op == Op::restore || op == Op::remove || op == Op::save)
+    if (code == RequestCode::restore || code == RequestCode::remove || code == RequestCode::save)
     {
       auto filename = Filename::read_from_socket(socket, error);
       if (!filename)
@@ -832,11 +693,11 @@ namespace
         return {};
       }
 
-      if (op == Op::restore)
+      if (code == RequestCode::restore)
       {
         return std::make_unique<RequestRestore>(user_id, version, std::move(filename.value()));
       }
-      else if (op == Op::remove)
+      else if (code == RequestCode::remove)
       {
         return std::make_unique<RequestDelete>(user_id, version, std::move(filename.value()));
       }
@@ -870,56 +731,62 @@ namespace
     return true;
   }
 
+  bool handle_request(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+  {
+    log("Receiving request :)");
+    auto request = read_request(socket, error);
+    if (!request)
+    {
+      log("Request reading failed!");
+      clear_socket(socket, error);
+      return false;
+    }
+    log(*request);
+
+    if (socket.available())
+    {
+      log("Socket had redundant data. Discarding it.");
+      if (!clear_socket(socket, error))
+      {
+        log("Failed to discard extra data: ", error.message());
+      }
+    }
+
+    log("Request received. Generating response:");
+    auto response = request->process();
+    if (!response)
+    {
+      log("Request processing failed!");
+      return false;
+    }
+    log(*response);
+
+    log("Sending response:");
+    if (!response->write_to_socket(socket, error))
+    {
+      log("Failed to send response: ", error.message());
+      return false;
+    }
+    log("Response sent successfully :D");
+
+    return true;
+  }
+
   void handle_client(boost::asio::ip::tcp::socket socket)
   {
     boost::system::error_code error;
 
     try
     {
-      log("Receiving request :)");
-      auto request = read_request(socket, error);
-      if (!request)
+      if (!handle_request(socket, error))
       {
-        log("Request reading failed!");
-        return;
+        send_general_error(socket, error);
       }
-      log(*request);
-
-      if (socket.available())
-      {
-        log("Socket had redundant data. Discarding it.");
-        if (!clear_socket(socket, error))
-        {
-          log("Failed to discard extra data: ", error.message());
-          return;
-        }
-      }
-
-      log("Request received. Generating response:");
-      auto response = request->process();
-      if (!response)
-      {
-        log("Request processing failed!");
-        return;
-      }
-      log(*response);
-
-      log("Sending response:");
-      if (!response->write_to_socket(socket, error))
-      {
-        log("Failed to send response: ", error.message());
-        return;
-      }
-      log("Response sent successfully :D");
     }
     catch ([[maybe_unused]] std::exception &e)
     {
-      ResponseErrorGeneral response;
-      response.write_to_socket(socket, error);
-      if (error)
-      {
-        log("Terminating client because of the following exception: ", e.what());
-      }
+      log("Exception caught: ", e.what());
+      send_general_error(socket, error);
     }
   }
 } // anonymous namespace
@@ -929,8 +796,37 @@ namespace
 // +----------------------------------------------------------------------------------+
 // | Implementation of the functions that were declared on #pragma interface          |
 // +----------------------------------------------------------------------------------+
-namespace maman14
+namespace maman15
 {
+  Client::Client()
+  {
+    log("Client created");
+  }
+
+  bool Client::register_to_server()
+  {
+    log("Registering to server");
+    return true;
+  }
+
+  bool Client::send_public_key()
+  {
+    log("Sending public key");
+    return true;
+  }
+
+  bool Client::send_file(const std::filesystem::path &file_path)
+  {
+    log("Sending file: ", file_path);
+    return true;
+  }
+
+  bool Client::validate_crc()
+  {
+    log("Validating CRC");
+    return true;
+  }
+
   static void start_server_on_port(uint16_t port)
   {
     using boost::asio::ip::tcp;
@@ -953,8 +849,7 @@ namespace maman14
       log("Terminating server because of the following exception: ", e.what());
     }
   }
-
-} // namespace maman14
+} // namespace maman15
 #pragma endregion
 
 #pragma region cleanup
