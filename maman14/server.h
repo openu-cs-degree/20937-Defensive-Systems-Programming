@@ -493,8 +493,8 @@ namespace
     const uint8_t version;
     const Status status;
 
-    Response(uint8_t version, Status status)
-        : version(version), status(status){};
+    Response(Status status)
+        : version(maman14::server_version), status(status){};
 
   public:
     Response(const Response &) = delete;
@@ -529,8 +529,8 @@ namespace
   protected:
     const Filename filename;
 
-    ResponseWithFileName(uint8_t version, Status status, Filename filename)
-        : Response(version, status), filename(std::move(filename)){};
+    ResponseWithFileName(Status status, Filename filename)
+        : Response(status), filename(std::move(filename)){};
 
   public:
     ResponseWithFileName(const ResponseWithFileName &) = delete;
@@ -567,8 +567,8 @@ namespace
   protected:
     const Payload payload;
 
-    ResponseWithPayload(uint8_t version, Status status, Filename filename, Payload payload)
-        : ResponseWithFileName(version, status, std::move(filename)), payload(std::move(payload)){};
+    ResponseWithPayload(Status status, Filename filename, Payload payload)
+        : ResponseWithFileName(status, std::move(filename)), payload(std::move(payload)){};
 
   public:
     ResponseWithPayload(const ResponseWithPayload &) = delete;
@@ -606,42 +606,42 @@ namespace
   {
   public:
     explicit ResponseSuccessRestore(Filename filename, Payload payload)
-        : ResponseWithPayload(maman14::server_version, Status::success_restore, std::move(filename), std::move(payload)){};
+        : ResponseWithPayload(Status::success_restore, std::move(filename), std::move(payload)){};
   };
 
   class ResponseSuccessList final : public ResponseWithPayload
   {
   public:
     explicit ResponseSuccessList(Filename filename, Payload payload)
-        : ResponseWithPayload(maman14::server_version, Status::success_list, std::move(filename), std::move(payload)){};
+        : ResponseWithPayload(Status::success_list, std::move(filename), std::move(payload)){};
   };
 
   class ResponseSuccessSave final : public ResponseWithFileName
   {
   public:
     explicit ResponseSuccessSave(Filename filename)
-        : ResponseWithFileName(maman14::server_version, Status::success_save, std::move(filename)){};
+        : ResponseWithFileName(Status::success_save, std::move(filename)){};
   };
 
   class ResponseErrorNoFile final : public ResponseWithFileName
   {
   public:
     explicit ResponseErrorNoFile(Filename filename)
-        : ResponseWithFileName(maman14::server_version, Status::error_no_file, std::move(filename)){};
+        : ResponseWithFileName(Status::error_no_file, std::move(filename)){};
   };
 
   class ResponseErrorNoClient final : public Response
   {
   public:
     explicit ResponseErrorNoClient()
-        : Response(maman14::server_version, Status::error_no_client){};
+        : Response(Status::error_no_client){};
   };
 
   class ResponseErrorGeneral final : public Response
   {
   public:
     explicit ResponseErrorGeneral()
-        : Response(maman14::server_version, Status::error_general){};
+        : Response(Status::error_general){};
   };
 
   // Request concrete classs (final, non-abstract)
