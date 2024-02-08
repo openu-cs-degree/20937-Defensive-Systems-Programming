@@ -312,80 +312,90 @@ namespace
     }
   };
 
-  class Filename
+  template <typename Tag>
+  class NameBase
   {
-    uint16_t name_len;
-    std::unique_ptr<char[]> content;
+    static constexpr size_t name_len = 255;
+    std::array<char, name_len> name;
 
   private:
-    Filename() = default;
+    NameBase() = default;
+    ~NameBase() = default;
 
   public:
-    Filename(const Filename &) = delete;
-    Filename &operator=(const Filename &) = delete;
-    Filename(Filename &&) = default;
-    Filename &operator=(Filename &&) = default;
-    ~Filename() = default;
-
-    explicit Filename(const std::string_view &filename)
-        : name_len(static_cast<uint16_t>(filename.size())), content(std::make_unique<char[]>(name_len))
-    {
-      std::move(filename.begin(), filename.end(), this->content.get());
-    }
+    NameBase(const NameBase &) = delete;
+    NameBase &operator=(const NameBase &) = delete;
+    NameBase(NameBase &&) = default;
+    NameBase &operator=(NameBase &&) = default;
 
     const std::string_view get_name() const
     {
-      return std::string_view(content.get(), name_len);
+      return std::string_view(name.data(), name.size());
     }
 
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
-      SOCKET_WRITE_OR_RETURN(&name_len, sizeof(name_len), false, "Failed to write name_len: ", error.message());
-
-      SOCKET_WRITE_OR_RETURN(content.get(), name_len, false, "Failed to write filename: ", error.message());
+      SOCKET_WRITE_OR_RETURN(&name, name_len, false, "Failed to write " + Tag::type_name + ": ", error.message());
 
       return true;
     }
 
-    static const std::optional<Filename> read_from_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+    static const std::optional<NameBase> read_from_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
     {
-      Filename filename;
+      NameBase name;
 
-      SOCKET_READ_OR_RETURN(&filename.name_len, sizeof(filename.name_len), std::nullopt, "Failed to read name_len: ", error.message());
+      SOCKET_READ_OR_RETURN(&name, name_len, std::nullopt, "Failed to read " + Tag::type_name + ": ", error.message());
 
-      if (filename.name_len == 0)
+      if (!Tag::is_valid(name))
       {
-        log("name_len can't be 0");
+        log("Invalid " + Tag::type_name + ": ", name.get_name());
         return std::nullopt;
       }
 
-      filename.content = std::make_unique<char[]>(filename.name_len);
-
-      SOCKET_READ_OR_RETURN(filename.content.get(), filename.name_len, std::nullopt, "Failed to read filename: ", error.message());
-
-      if (!filename.is_filename_valid())
-      {
-        log("Invalid filename: ", filename.get_name());
-        return std::nullopt;
-      }
-
-      return filename;
+      return name;
     }
 
-    friend std::ostream &operator<<(std::ostream &os, const Filename &filename)
+    friend std::ostream &operator<<(std::ostream &os, const NameBase &name)
     {
-      os << "name_len: " << filename.name_len << '\n';
-      os << "filename: " << filename.get_name() << '\n';
+      os << Tag::type_name + ": " << name.get_name() << '\n';
       return os;
     }
+  };
 
-  private:
-    const bool is_filename_valid() const
+  struct NameTag
+  {
+    static constexpr char type_name[] = "name";
+
+    static bool is_valid(const NameBase<NameTag> &name)
     {
-      return std::all_of(content.get(), content.get() + name_len, [](char c) -> bool
-                         { return std::isalnum(c) || c == '.' || c == '_' || c == '-'; });
+      const std::string_view name_view = name.get_name();
+
+      return std::none_of(name_view.begin(), name_view.end() - 1, [](char c)
+                          { return c == '\0'; }) &&
+             *(name_view.end() - 1) == '\0';
     }
   };
+
+  struct FilenameTag
+  {
+    static constexpr char type_name[] = "filename";
+
+    static bool is_valid(const NameBase<FilenameTag> &filename)
+    {
+      const std::string_view name_view = filename.get_name();
+
+      static constexpr std::initializer_list<char> forbidden_start_char = {' '};
+      static constexpr std::initializer_list<char> forbidden_middle_chars = {'\0', '/', '\\', ':', '*', '?', '"', '<', '>', '|'};
+      static constexpr std::initializer_list<char> forbidden_end_char = {' ', '.'};
+
+      return std::none_of(forbidden_start_char.begin(), forbidden_start_char.end(), [&](char c) { return name_view.front() == c; }) &&
+             std::none_of(forbidden_end_char.begin(), forbidden_end_char.end(), [&](char c) { return name_view.back() == c; }) &&
+             std::none_of(name_view.begin(), name_view.end(), [&](char c) { return std::any_of(forbidden_middle_chars.begin(), forbidden_middle_chars.end(), [&](char f) { return f == c; }); });
+    }
+  };
+
+  using Name = NameBase<NameTag>;
+  using Filename = NameBase<FilenameTag>;
 
   struct ClientID
   {
