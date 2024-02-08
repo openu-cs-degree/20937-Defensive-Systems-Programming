@@ -210,108 +210,6 @@ namespace
 
   // classes to be used by both Request and Response
 
-  class Payload
-  {
-    std::vector<uint8_t> content;
-
-  private:
-    Payload() = default;
-
-  public:
-    Payload(const Payload &) = delete;
-    Payload &operator=(const Payload &) = delete;
-    Payload(Payload &&) = default;
-    Payload &operator=(Payload &&) = default;
-    ~Payload() = default;
-
-    Payload(std::vector<uint8_t> content)
-        : content(std::move(content)){};
-
-    explicit Payload(const std::string &content)
-        : content(content.begin(), content.end()){};
-
-    const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
-    {
-      SOCKET_WRITE_OR_RETURN(&size, sizeof(size), false, "Failed to write payload size: ", error.message());
-
-      SOCKET_WRITE_OR_RETURN(content.get(), size, false, "Failed to write payload content: ", error.message());
-
-      return true;
-    };
-
-    const bool write_to_file(const std::filesystem::path &file_path) const
-    {
-      std::ofstream file(file_path, std::ios::binary | std::ios::trunc);
-      if (!file)
-      {
-        log("Failed to open file: ", file_path);
-        return false;
-      }
-
-      file.write(reinterpret_cast<const char *>(content.get()), size);
-      if (!file)
-      {
-        log("Failed to write to file: ", file_path);
-        return false;
-      }
-
-      return true;
-    }
-
-    static const std::optional<Payload> read_from_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
-    {
-      Payload payload;
-
-      SOCKET_READ_OR_RETURN(&payload.size, sizeof(payload.size), {}, "Failed to read payload size: ", error.message());
-
-      payload.content = std::make_unique<uint8_t[]>(payload.size);
-
-      SOCKET_READ_OR_RETURN(payload.content.get(), payload.size, {}, "Failed to read payload content: ", error.message());
-
-      return payload;
-    };
-
-    static const std::optional<Payload> read_from_file(const std::filesystem::path &file_path)
-    {
-      std::ifstream file(file_path, std::ios::binary | std::ios::ate);
-      if (!file)
-      {
-        log("Failed to open file: ", file_path);
-        return {};
-      }
-
-      std::streamsize size = file.tellg();
-      file.seekg(0, std::ios::beg);
-
-      if (size > std::numeric_limits<uint32_t>::max())
-      {
-        log("File size is too big: ", size);
-        return {};
-      }
-
-      std::unique_ptr<uint8_t[]> content(new uint8_t[static_cast<uint32_t>(size)]);
-      file.read(reinterpret_cast<char *>(content.get()), size);
-      if (!file)
-      {
-        log("Failed to read file: ", file_path);
-        return {};
-      }
-
-      return std::make_optional<Payload>(static_cast<uint32_t>(size), std::move(content));
-    }
-
-    friend std::ostream &operator<<(std::ostream &os, const Payload &payload)
-    {
-      static constexpr uint32_t MAX_PAYLOAD_PRINT_SIZE = 69;
-
-      os << "payload size: " << payload.size << '\n';
-      os << (payload.size > MAX_PAYLOAD_PRINT_SIZE ? "payload (printing limited to 69 bytes):\n" : "payload:\n")
-         << std::string_view(reinterpret_cast<const char *>(payload.content.get()), std::min(payload.size, MAX_PAYLOAD_PRINT_SIZE)) << '\n';
-
-      return os;
-    }
-  };
-
   template <typename Tag>
   class NameBase
   {
@@ -474,8 +372,9 @@ namespace
 
     virtual ~Response() = default;
 
-    static const std::optional<Response> read_response_header(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+    static const std::optional<std::tuple<uint8_t, ResponseCode, uint32_t>> read_response_header(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
     {
+      // TODO: replace with ResponseHeader and send instead of tuple
       struct ResponseData
       {
         uint8_t server_version;
@@ -492,8 +391,7 @@ namespace
         return std::nullopt;
       }
 
-      /// TODO: std::tuple?
-      return Response(data.server_version, data.code, data.payload_size);
+      return std::make_tuple(data.server_version, data.code, data.payload_size);
     }
 
     virtual void print(std::ostream &os) const
@@ -671,7 +569,7 @@ namespace
         : Request(client_id, RequestCode::crc_invalid_4th_time, payload_size), filename(std::move(filename)){};
   };
 
-  // Sending requests
+  // Requests & Responses IO
 
   const bool send_request(const Request &request, const boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
   {
@@ -727,6 +625,52 @@ namespace
         variant = request;
     return std::visit(Visitor{}, variant);
   }
+
+  const std::unique_ptr<Response> read_response(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+  {
+    auto response = Response::read_response_header(socket, error);
+    if (!response)
+    {
+      return {};
+    }
+
+    auto &[server_version, code, payload_size] = *response;
+
+    if (code == ResponseCode::sign_up_succeeded)
+    {
+      return std::make_unique<ResponseSuccessSignUp>(server_version, ClientID{});
+    }
+    if (code == ResponseCode::sign_up_failed)
+    {
+      return std::make_unique<ResponseFailureSignUp>(server_version);
+    }
+    if (code == ResponseCode::public_key_received)
+    {
+      return std::make_unique<ResponseSuccessPublicKey>(server_version, ClientID{}, std::array<uint8_t, 256>{});
+    }
+    if (code == ResponseCode::crc_valid)
+    {
+      return std::make_unique<ResponseSuccessCRCValid>(server_version, ClientID{}, 0, std::array<uint8_t, 255>{}, 0);
+    }
+    if (code == ResponseCode::message_received)
+    {
+      return std::make_unique<ResponseSuccessMessageReceived>(server_version, ClientID{});
+    }
+    if (code == ResponseCode::sign_in_allowed)
+    {
+      return std::make_unique<ResponseSuccessSignInAllowed>(server_version, ClientID{}, std::array<uint8_t, 256>{});
+    }
+    if (code == ResponseCode::sign_in_rejected)
+    {
+      return std::make_unique<ResponseFailureSignInRejected>(server_version, ClientID{});
+    }
+    if (code == ResponseCode::general_error)
+    {
+      return std::make_unique<ResponseErrorGeneral>(server_version);
+    }
+
+    return {};
+  }
 #pragma pack(pop)
 } // anonymous namespace
 #pragma endregion
@@ -737,53 +681,6 @@ namespace
 // +----------------------------------------------------------------------------------+
 namespace
 {
-  std::unique_ptr<Request> read_request(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
-  {
-    // Read the common part of the request
-    auto user_id_and_version_and_code = Request::read_user_id_and_version_and_code(socket, error);
-    if (!user_id_and_version_and_code)
-    {
-      return {};
-    }
-
-    auto &[user_id, version, code] = *user_id_and_version_and_code;
-
-    // Interpret each request type according to the code
-    if (code == RequestCode::list)
-    {
-      return std::make_unique<RequestList>(user_id, version);
-    }
-    if (code == RequestCode::restore || code == RequestCode::remove || code == RequestCode::save)
-    {
-      auto filename = Filename::read_from_socket(socket, error);
-      if (!filename)
-      {
-        return {};
-      }
-
-      if (code == RequestCode::restore)
-      {
-        return std::make_unique<RequestRestore>(user_id, version, std::move(filename.value()));
-      }
-      else if (code == RequestCode::remove)
-      {
-        return std::make_unique<RequestDelete>(user_id, version, std::move(filename.value()));
-      }
-      else
-      {
-        auto payload = Payload::read_from_socket(socket, error);
-        if (!payload)
-        {
-          return {};
-        }
-
-        return std::make_unique<RequestSave>(user_id, version, std::move(filename.value()), std::move(payload.value()));
-      }
-    }
-
-    return {};
-  }
-
   const bool clear_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
   {
     boost::asio::streambuf discard_buffer;
@@ -797,65 +694,6 @@ namespace
       }
     }
     return true;
-  }
-
-  bool handle_request(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
-  {
-    log("Receiving request :)");
-    auto request = read_request(socket, error);
-    if (!request)
-    {
-      log("Request reading failed!");
-      clear_socket(socket, error);
-      return false;
-    }
-    log(*request);
-
-    if (socket.available())
-    {
-      log("Socket had redundant data. Discarding it.");
-      if (!clear_socket(socket, error))
-      {
-        log("Failed to discard extra data: ", error.message());
-      }
-    }
-
-    log("Request received. Generating response:");
-    auto response = request->process();
-    if (!response)
-    {
-      log("Request processing failed!");
-      return false;
-    }
-    log(*response);
-
-    log("Sending response:");
-    if (!response->write_to_socket(socket, error))
-    {
-      log("Failed to send response: ", error.message());
-      return false;
-    }
-    log("Response sent successfully :D");
-
-    return true;
-  }
-
-  void handle_client(boost::asio::ip::tcp::socket socket)
-  {
-    boost::system::error_code error;
-
-    try
-    {
-      if (!handle_request(socket, error))
-      {
-        send_general_error(socket, error);
-      }
-    }
-    catch ([[maybe_unused]] std::exception &e)
-    {
-      log("Exception caught: ", e.what());
-      send_general_error(socket, error);
-    }
   }
 } // anonymous namespace
 #pragma endregion
@@ -893,29 +731,6 @@ namespace maman15
   {
     log("Validating CRC");
     return true;
-  }
-
-  static void start_server_on_port(uint16_t port)
-  {
-    using boost::asio::ip::tcp;
-
-    try
-    {
-      boost::asio::io_context io_context;
-      tcp::socket socket(io_context);
-      tcp::acceptor acceptor(io_context, tcp::endpoint(tcp::v4(), port));
-
-      while (true)
-      {
-        acceptor.accept(socket);
-
-        std::thread(handle_client, std::move(socket)).detach();
-      }
-    }
-    catch ([[maybe_unused]] std::exception &e)
-    {
-      log("Terminating server because of the following exception: ", e.what());
-    }
   }
 } // namespace maman15
 #pragma endregion
