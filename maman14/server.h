@@ -363,8 +363,13 @@ namespace
   private:
     const bool is_filename_valid() const
     {
-      return std::all_of(content.get(), content.get() + name_len, [](char c) -> bool
-                         { return std::isalnum(c) || c == '.' || c == '_' || c == '-'; });
+      static constexpr std::initializer_list<char> forbidden_start_char = {' '};
+      static constexpr std::initializer_list<char> forbidden_middle_chars = {'\0', '/', '\\', ':', '*', '?', '"', '<', '>', '|'};
+      static constexpr std::initializer_list<char> forbidden_end_char = {' ', '.'};
+
+      return std::none_of(forbidden_start_char.begin(), forbidden_start_char.end(), [&](char c) { return content[0] == c; }) &&
+             std::none_of(forbidden_end_char.begin(), forbidden_end_char.end(), [&](char c) { return content[name_len - 1] == c; }) &&
+             std::none_of(content.get(), content.get() + name_len, [&](char c) { return std::any_of(forbidden_middle_chars.begin(), forbidden_middle_chars.end(), [&](char f) { return f == c; }); });
     }
   };
 
