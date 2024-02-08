@@ -66,6 +66,7 @@
 #include <optional>
 #include <fstream>
 #include <cstdint>
+#include <variant>
 #include <thread>
 #include <memory>
 
@@ -659,6 +660,63 @@ namespace
     explicit RequestCRCInvalid4thTime(ClientID client_id, std::array<uint8_t, 255> filename)
         : Request(client_id, RequestCode::crc_invalid_4th_time, payload_size), filename(std::move(filename)){};
   };
+
+  // Sending requests
+
+  const bool send_request(const Request &request, const boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+  {
+    struct Visitor
+    {
+      bool operator()(const RequestSignUp &request)
+      {
+        log("Sending sign up request");
+        return true;
+      }
+      bool operator()(const RequestSendPublicKey &request)
+      {
+        log("Sending public key request");
+        return true;
+      }
+      bool operator()(const RequestSignIn &request)
+      {
+        log("Sending sign in request");
+        return true;
+      }
+      bool operator()(const RequestSendFile &request)
+      {
+        log("Sending file request");
+        return true;
+      }
+      bool operator()(const RequestCRCValid &request)
+      {
+        log("Sending CRC valid request");
+        return true;
+      }
+      bool operator()(const RequestCRCInvalid &request)
+      {
+        log("Sending CRC invalid request");
+        return true;
+      }
+      bool operator()(const RequestCRCInvalid4thTime &request)
+      {
+        log("Sending CRC invalid for the 4th time request");
+        return true;
+      }
+      bool operator()(const Request &request) = delete;
+    };
+
+    std::variant<
+        std::reference_wrapper<const RequestSignUp>,
+        std::reference_wrapper<const RequestSendPublicKey>,
+        std::reference_wrapper<const RequestSignIn>,
+        std::reference_wrapper<const RequestSendFile>,
+        std::reference_wrapper<const RequestCRCValid>,
+        std::reference_wrapper<const RequestCRCInvalid>,
+        std::reference_wrapper<const RequestCRCInvalid4thTime>,
+        std::reference_wrapper<const Request>>
+        variant = request;
+    return std::visit(Visitor{}, variant);
+  }
 #pragma pack(pop)
 } // anonymous namespace
 #pragma endregion
