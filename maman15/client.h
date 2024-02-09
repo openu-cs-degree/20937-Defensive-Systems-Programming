@@ -334,6 +334,37 @@ namespace
     }
   };
 
+  struct PacketNumber
+  {
+    uint32_t data;
+
+    uint16_t getPacketNumber() const
+    {
+      return data >> 16;
+    }
+
+    uint16_t getTotalPackets() const
+    {
+      return data & 0xFFFF;
+    }
+
+    void setPacketNumber(uint16_t packetNumber)
+    {
+      data = (data & 0xFFFF) | (packetNumber << 16);
+    }
+
+    void setTotalPackets(uint16_t totalPackets)
+    {
+      data = (data & 0xFFFF0000) | totalPackets;
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, const PacketNumber &packet)
+    {
+      os << "packet number " << packet.getPacketNumber() << " out of " << packet.getTotalPackets();
+      return os;
+    }
+  };
+
   // forward declare Response so that it can be used in Request::process()
 
   class Response;
@@ -639,13 +670,13 @@ namespace
   {
     uint32_t content_size;
     uint32_t orig_file_size;
-    uint32_t packet_number_and_total_packets; // TODO: replace with Packet class
+    PacketNumber packet_number_and_total_packets;
     Filename filename;
     std::vector<uint8_t> content;
     static constexpr uint32_t payload_size_without_content = sizeof(content_size) + sizeof(orig_file_size) + sizeof(packet_number_and_total_packets) + sizeof(filename);
 
   public:
-    explicit RequestSendFile(ClientID client_id, uint32_t content_size, uint32_t orig_file_size, uint32_t packet_number_and_total_packets, Filename filename, std::vector<uint8_t> content)
+    explicit RequestSendFile(ClientID client_id, uint32_t content_size, uint32_t orig_file_size, PacketNumber packet_number_and_total_packets, Filename filename, std::vector<uint8_t> content)
         : Request(client_id, RequestCode::send_file, payload_size_without_content + content_size), content_size(content_size), orig_file_size(orig_file_size), packet_number_and_total_packets(packet_number_and_total_packets), filename(std::move(filename)), content(std::move(content)){};
 
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
