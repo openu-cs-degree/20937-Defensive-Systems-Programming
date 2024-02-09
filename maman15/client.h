@@ -59,16 +59,16 @@
 // +----------------------------------------------------------------------------------+
 // | Inlcudes: Standard Library and Boost                                             |
 // +----------------------------------------------------------------------------------+
-#include <string_view>
-#include <filesystem>
 #include <algorithm>
-#include <iostream>
-#include <optional>
-#include <fstream>
 #include <cstdint>
-#include <variant>
-#include <thread>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
 #include <memory>
+#include <optional>
+#include <string_view>
+#include <thread>
+#include <variant>
 
 #pragma warning(push)
 #pragma warning(disable : 6001 6031 6101 6255 6258 6313 6387)
@@ -97,7 +97,9 @@ namespace
   }
 #else
   template <typename... Args>
-  void log([[maybe_unused]] const Args &...args) {}
+  void log([[maybe_unused]] const Args &...args)
+  {
+  }
 #endif
 } // anonymous namespace
 
@@ -150,6 +152,13 @@ namespace maman15
     bool send_public_key();
     bool send_file(const std::filesystem::path &file_path);
     bool validate_crc();
+
+  private:
+    boost::asio::io_context io_context;
+    boost::asio::ip::tcp::socket socket;
+    boost::asio::ip::tcp::acceptor acceptor;
+
+    bool clear_socket();
   };
 } // namespace maman15
 #pragma endregion
@@ -268,8 +277,7 @@ namespace
     {
       const std::string_view name_view = name.get_name();
 
-      return std::none_of(name_view.begin(), name_view.end() - 1, [](char c)
-                          { return c == '\0'; }) &&
+      return std::none_of(name_view.begin(), name_view.end() - 1, [](char c) { return c == '\0'; }) &&
              *(name_view.end() - 1) == '\0';
     }
   };
@@ -282,9 +290,9 @@ namespace
     {
       const std::string_view name_view = filename.get_name();
 
-      static constexpr std::initializer_list<char> forbidden_start_char = {' '};
-      static constexpr std::initializer_list<char> forbidden_middle_chars = {'\0', '/', '\\', ':', '*', '?', '"', '<', '>', '|'};
-      static constexpr std::initializer_list<char> forbidden_end_char = {' ', '.'};
+      static constexpr std::array forbidden_start_char = {' '};
+      static constexpr std::array forbidden_middle_chars = {'\0', '/', '\\', ':', '*', '?', '"', '<', '>', '|'};
+      static constexpr std::array forbidden_end_char = {' ', '.'};
 
       return std::none_of(forbidden_start_char.begin(), forbidden_start_char.end(), [&](char c) { return name_view.front() == c; }) &&
              std::none_of(forbidden_end_char.begin(), forbidden_end_char.end(), [&](char c) { return name_view.back() == c; }) &&
@@ -705,6 +713,7 @@ namespace
 namespace maman15
 {
   Client::Client()
+      : socket(io_context), acceptor(io_context)
   {
     log("Client created");
   }
@@ -730,6 +739,22 @@ namespace maman15
   bool Client::validate_crc()
   {
     log("Validating CRC");
+    return true;
+  }
+
+  bool Client::clear_socket()
+  {
+    boost::system::error_code error;
+    boost::asio::streambuf discard_buffer;
+    while (socket.available())
+    {
+      socket.read_some(discard_buffer.prepare(socket.available()), error);
+      discard_buffer.commit(socket.available());
+      if (error)
+      {
+        return false;
+      }
+    }
     return true;
   }
 } // namespace maman15

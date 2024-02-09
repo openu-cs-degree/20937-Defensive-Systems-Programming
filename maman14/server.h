@@ -69,15 +69,15 @@
 // +----------------------------------------------------------------------------------+
 // | Inlcudes: Standard Library and Boost                                             |
 // +----------------------------------------------------------------------------------+
-#include <string_view>
-#include <filesystem>
 #include <algorithm>
-#include <iostream>
-#include <optional>
-#include <fstream>
 #include <cstdint>
-#include <thread>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
 #include <memory>
+#include <optional>
+#include <string_view>
+#include <thread>
 
 #pragma warning(push)
 #pragma warning(disable : 6001 6031 6101 6255 6258 6313 6387)
@@ -106,7 +106,9 @@ namespace
   }
 #else
   template <typename... Args>
-  void log([[maybe_unused]] const Args &...args) {}
+  void log([[maybe_unused]] const Args &...args)
+  {
+  }
 #endif
 } // anonymous namespace
 
@@ -369,7 +371,8 @@ namespace
 
       return std::none_of(forbidden_start_char.begin(), forbidden_start_char.end(), [&](char c) { return content[0] == c; }) &&
              std::none_of(forbidden_end_char.begin(), forbidden_end_char.end(), [&](char c) { return content[name_len - 1] == c; }) &&
-             std::none_of(content.get(), content.get() + name_len, [&](char c) { return std::any_of(forbidden_middle_chars.begin(), forbidden_middle_chars.end(), [&](char f) { return f == c; }); });
+             std::none_of(content.get(), content.get() + name_len, [&](char c) { return std::any_of(
+                                                                                     forbidden_middle_chars.begin(), forbidden_middle_chars.end(), [&](char f) { return f == c; }); });
     }
   };
 
@@ -769,8 +772,7 @@ namespace
     const std::string generate_random_file_name() const
     {
       static constexpr uint16_t length = 32;
-      auto generate_random_character = []() -> char
-      {
+      auto generate_random_character = []() -> char {
         static constexpr std::string_view characters = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
         return characters[rand() % characters.size()];
       };
@@ -796,8 +798,7 @@ namespace
       std::ostringstream oss;
       std::for_each(std::filesystem::directory_iterator(src_path),
                     std::filesystem::directory_iterator(),
-                    [&](const auto &entry)
-                    {
+                    [&](const auto &entry) {
                       if (auto filename = entry.path().filename().string(); filename != ignored_filename)
                       {
                         oss << filename << '\n';
