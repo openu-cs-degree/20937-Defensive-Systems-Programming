@@ -227,14 +227,13 @@ namespace
     std::array<char, name_len> name;
 
   private:
-    NameBase() = default;
-    ~NameBase() = default;
-
   public:
+    NameBase() = default; // TODO: make private
     NameBase(const NameBase &) = delete;
     NameBase &operator=(const NameBase &) = delete;
     NameBase(NameBase &&) = default;
     NameBase &operator=(NameBase &&) = default;
+    ~NameBase() = default;
 
     const std::string_view get_name() const
     {
@@ -265,7 +264,7 @@ namespace
 
     friend std::ostream &operator<<(std::ostream &os, const NameBase &name)
     {
-      os << Trait::type_name + ": " << name.get_name() << '\n';
+      os << Trait::type_name << ": " << name.get_name() << '\n';
       return os;
     }
   };
@@ -471,19 +470,19 @@ namespace
   {
     ClientID client_id;
     uint32_t content_size;
-    std::array<uint8_t, 255> filename; //  TODO: replace with Filename class
+    Filename filename;
     uint32_t ckcsum;
     static constexpr uint32_t payload_size = sizeof(client_id) + sizeof(content_size) + sizeof(filename) + sizeof(ckcsum);
 
   public:
-    explicit ResponseSuccessCRCValid(uint8_t server_version, ClientID client_id, uint32_t content_size, std::array<uint8_t, 255> filename, uint32_t ckcsum)
+    explicit ResponseSuccessCRCValid(uint8_t server_version, ClientID client_id, uint32_t content_size, Filename filename, uint32_t ckcsum)
         : Response(server_version, ResponseCode::crc_valid, payload_size), client_id(client_id), content_size(content_size), filename(std::move(filename)), ckcsum(ckcsum){};
 
     friend std::ostream &operator<<(std::ostream &os, const ResponseSuccessCRCValid &response)
     {
       os << '\t' << "client_id: " << response.client_id << '\n'
          << '\t' << "content_size: " << response.content_size << '\n'
-         << '\t' << "filename: " << response.filename.data() << '\n'
+         << '\t' << "filename: " << response.filename << '\n'
          << '\t' << "ckcsum: " << response.ckcsum << '\n';
       return os;
     }
@@ -557,47 +556,47 @@ namespace
 
   class RequestSignUp final : public Request
   {
-    std::array<uint8_t, 255> name; // TODO: replace with Name class
+    Name name;
     static constexpr uint32_t payload_size = sizeof(name);
 
   public:
-    explicit RequestSignUp(ClientID client_id, std::array<uint8_t, 255> name)
+    explicit RequestSignUp(ClientID client_id, Name name)
         : Request(client_id, RequestCode::sign_up, payload_size), name(std::move(name)){};
 
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
-      SOCKET_WRITE_OR_RETURN(&this->name, sizeof(name), false, "Failed to write response: ", error.message());
+      SOCKET_WRITE_OR_RETURN(&this->name, sizeof(name), false, "Failed to write request's payload: ", error.message());
 
       return true;
     }
 
     friend std::ostream &operator<<(std::ostream &os, const RequestSignUp &request)
     {
-      os << '\t' << "name: " << request.name.data() << '\n';
+      os << '\t' << "name: " << request.name << '\n';
       return os;
     }
   };
 
   class RequestSendPublicKey final : public Request
   {
-    std::array<uint8_t, 255> name;       // TODO: replace with Name class
+    Name name;
     std::array<uint8_t, 160> public_key; // TODO: replace with public key class
     static constexpr uint32_t payload_size = sizeof(name) + sizeof(public_key);
 
   public:
-    explicit RequestSendPublicKey(ClientID client_id, std::array<uint8_t, 255> name, std::array<uint8_t, 160> public_key)
+    explicit RequestSendPublicKey(ClientID client_id, Name name, std::array<uint8_t, 160> public_key)
         : Request(client_id, RequestCode::send_public_key, payload_size), name(std::move(name)), public_key(std::move(public_key)){};
 
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
-      SOCKET_WRITE_OR_RETURN(&this->name, payload_size, false, "Failed to write response: ", error.message());
+      SOCKET_WRITE_OR_RETURN(&this->name, payload_size, false, "Failed to write request's payload: ", error.message());
 
       return true;
     }
 
     friend std::ostream &operator<<(std::ostream &os, const RequestSendPublicKey &request)
     {
-      os << '\t' << "name: " << request.name.data() << '\n'
+      os << '\t' << "name: " << request.name << '\n'
          << '\t' << "public_key: " << request.public_key.data() << '\n';
       return os;
     }
@@ -605,23 +604,23 @@ namespace
 
   class RequestSignIn final : public Request
   {
-    std::array<uint8_t, 255> name; // TODO: replace with Name class
+    Name name;
     static constexpr uint32_t payload_size = sizeof(name);
 
   public:
-    explicit RequestSignIn(ClientID client_id, std::array<uint8_t, 255> name)
-        : Request(client_id, RequestCode::sign_in, payload_size), name(name){};
+    explicit RequestSignIn(ClientID client_id, Name name)
+        : Request(client_id, RequestCode::sign_in, payload_size), name(std::move(name)){};
 
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
-      SOCKET_WRITE_OR_RETURN(&this->name, payload_size, false, "Failed to write response: ", error.message());
+      SOCKET_WRITE_OR_RETURN(&this->name, payload_size, false, "Failed to write request's payload: ", error.message());
 
       return true;
     }
 
     friend std::ostream &operator<<(std::ostream &os, const RequestSignIn &request)
     {
-      os << '\t' << "name: " << request.name.data() << '\n';
+      os << '\t' << "name: " << request.name << '\n';
       return os;
     }
   };
@@ -631,19 +630,19 @@ namespace
     uint32_t content_size;
     uint32_t orig_file_size;
     uint32_t packet_number_and_total_packets; // TODO: replace with Packet class
-    std::array<uint8_t, 255> filename;        // TODO: replace with Filename class
+    Filename filename;
     std::vector<uint8_t> content;
     static constexpr uint32_t payload_size_without_content = sizeof(content_size) + sizeof(orig_file_size) + sizeof(packet_number_and_total_packets) + sizeof(filename);
 
   public:
-    explicit RequestSendFile(ClientID client_id, uint32_t content_size, uint32_t orig_file_size, uint32_t packet_number_and_total_packets, std::array<uint8_t, 255> filename, std::vector<uint8_t> content)
+    explicit RequestSendFile(ClientID client_id, uint32_t content_size, uint32_t orig_file_size, uint32_t packet_number_and_total_packets, Filename filename, std::vector<uint8_t> content)
         : Request(client_id, RequestCode::send_file, payload_size_without_content + content_size), content_size(content_size), orig_file_size(orig_file_size), packet_number_and_total_packets(packet_number_and_total_packets), filename(std::move(filename)), content(std::move(content)){};
 
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
-      SOCKET_WRITE_OR_RETURN(&this->content_size, payload_size_without_content, false, "Failed to write response: ", error.message());
+      SOCKET_WRITE_OR_RETURN(&this->content_size, payload_size_without_content, false, "Failed to write request's payload: ", error.message());
 
-      SOCKET_WRITE_OR_RETURN(this->content.data(), this->content.size(), false, "Failed to write response: ", error.message());
+      SOCKET_WRITE_OR_RETURN(this->content.data(), this->content.size(), false, "Failed to write request's payload: ", error.message());
 
       return true;
     }
@@ -653,7 +652,7 @@ namespace
       os << '\t' << "content_size: " << request.content_size << '\n'
          << '\t' << "orig_file_size: " << request.orig_file_size << '\n'
          << '\t' << "packet_number_and_total_packets: " << request.packet_number_and_total_packets << '\n'
-         << '\t' << "filename: " << request.filename.data() << '\n'
+         << '\t' << "filename: " << request.filename << '\n'
          << '\t' << "content: " << request.content.data() << '\n';
       return os;
     }
@@ -661,69 +660,69 @@ namespace
 
   class RequestCRCValid final : public Request
   {
-    std::array<uint8_t, 255> filename; // TODO: replace with Filename class
+    Filename filename;
     static constexpr uint32_t payload_size = sizeof(filename);
 
   public:
-    explicit RequestCRCValid(ClientID client_id, std::array<uint8_t, 255> filename)
+    explicit RequestCRCValid(ClientID client_id, Filename filename)
         : Request(client_id, RequestCode::crc_valid, payload_size), filename(std::move(filename)){};
 
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
-      SOCKET_WRITE_OR_RETURN(&this->filename, payload_size, false, "Failed to write response: ", error.message());
+      SOCKET_WRITE_OR_RETURN(&this->filename, payload_size, false, "Failed to write request's payload: ", error.message());
 
       return true;
     }
 
     friend std::ostream &operator<<(std::ostream &os, const RequestCRCValid &request)
     {
-      os << '\t' << "filename: " << request.filename.data() << '\n';
+      os << '\t' << "filename: " << request.filename << '\n';
       return os;
     }
   };
 
   class RequestCRCInvalid final : public Request
   {
-    std::array<uint8_t, 255> filename; // TODO: replace with Filename class
+    Filename filename;
     static constexpr uint32_t payload_size = sizeof(filename);
 
   public:
-    explicit RequestCRCInvalid(ClientID client_id, std::array<uint8_t, 255> filename)
+    explicit RequestCRCInvalid(ClientID client_id, Filename filename)
         : Request(client_id, RequestCode::crc_invalid, payload_size), filename(std::move(filename)){};
 
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
-      SOCKET_WRITE_OR_RETURN(&this->filename, payload_size, false, "Failed to write response: ", error.message());
+      SOCKET_WRITE_OR_RETURN(&this->filename, payload_size, false, "Failed to write request's payload: ", error.message());
 
       return true;
     }
 
     friend std::ostream &operator<<(std::ostream &os, const RequestCRCInvalid &request)
     {
-      os << '\t' << "filename: " << request.filename.data() << '\n';
+      os << '\t' << "filename: " << request.filename << '\n';
       return os;
     }
   };
 
   class RequestCRCInvalid4thTime final : public Request
   {
-    std::array<uint8_t, 255> filename; // TODO: replace with Filename class
+    Filename filename;
     static constexpr uint32_t payload_size = sizeof(filename);
 
   public:
-    explicit RequestCRCInvalid4thTime(ClientID client_id, std::array<uint8_t, 255> filename)
+    explicit RequestCRCInvalid4thTime(ClientID client_id, Filename filename)
         : Request(client_id, RequestCode::crc_invalid_4th_time, payload_size), filename(std::move(filename)){};
 
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
-      SOCKET_WRITE_OR_RETURN(&this->filename, payload_size, false, "Failed to write response: ", error.message());
+      SOCKET_WRITE_OR_RETURN(&this->filename, payload_size, false, "Failed to write request's payload: ", error.message());
 
       return true;
     }
 
     friend std::ostream &operator<<(std::ostream &os, const RequestCRCInvalid4thTime &request)
     {
-      os << '\t' << "filename: " << request.filename.data() << '\n';
+      os << '\t' << "filename: " << request.filename << '\n';
       return os;
     }
   };
@@ -783,7 +782,7 @@ namespace
     }
     if (code == ResponseCode::crc_valid)
     {
-      return std::make_unique<ResponseSuccessCRCValid>(server_version, ClientID{}, 0, std::array<uint8_t, 255>{}, 0);
+      return std::make_unique<ResponseSuccessCRCValid>(server_version, ClientID{}, 0, Filename{}, 0);
     }
     if (code == ResponseCode::message_received)
     {
