@@ -220,7 +220,7 @@ namespace
 
   // classes to be used by both Request and Response
 
-  template <typename Tag>
+  template <typename Trait>
   class NameBase
   {
     static constexpr size_t name_len = 255;
@@ -243,7 +243,7 @@ namespace
 
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
-      SOCKET_WRITE_OR_RETURN(&name, name_len, false, "Failed to write " + Tag::type_name + ": ", error.message());
+      SOCKET_WRITE_OR_RETURN(&name, name_len, false, "Failed to write " + Trait::type_name + ": ", error.message());
 
       return true;
     }
@@ -252,11 +252,11 @@ namespace
     {
       NameBase name;
 
-      SOCKET_READ_OR_RETURN(&name, name_len, std::nullopt, "Failed to read " + Tag::type_name + ": ", error.message());
+      SOCKET_READ_OR_RETURN(&name, name_len, std::nullopt, "Failed to read " + Trait::type_name + ": ", error.message());
 
-      if (!Tag::is_valid(name))
+      if (!Trait::is_valid(name))
       {
-        log("Invalid " + Tag::type_name + ": ", name.get_name());
+        log("Invalid " + Trait::type_name + ": ", name.get_name());
         return std::nullopt;
       }
 
@@ -265,16 +265,16 @@ namespace
 
     friend std::ostream &operator<<(std::ostream &os, const NameBase &name)
     {
-      os << Tag::type_name + ": " << name.get_name() << '\n';
+      os << Trait::type_name + ": " << name.get_name() << '\n';
       return os;
     }
   };
 
-  struct NameTag
+  struct NameTrait
   {
     static constexpr char type_name[] = "name";
 
-    static bool is_valid(const NameBase<NameTag> &name)
+    static bool is_valid(const NameBase<NameTrait> &name)
     {
       const std::string_view name_view = name.get_name();
 
@@ -283,11 +283,11 @@ namespace
     }
   };
 
-  struct FilenameTag
+  struct FilenameTrait
   {
     static constexpr char type_name[] = "filename";
 
-    static bool is_valid(const NameBase<FilenameTag> &filename)
+    static bool is_valid(const NameBase<FilenameTrait> &filename)
     {
       const std::string_view name_view = filename.get_name();
 
@@ -301,8 +301,8 @@ namespace
     }
   };
 
-  using Name = NameBase<NameTag>;
-  using Filename = NameBase<FilenameTag>;
+  using Name = NameBase<NameTrait>;
+  using Filename = NameBase<FilenameTrait>;
 
   struct ClientID
   {
