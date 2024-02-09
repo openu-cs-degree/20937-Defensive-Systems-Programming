@@ -68,6 +68,7 @@
 #include <optional>
 #include <string_view>
 #include <thread>
+#include <type_traits>
 #include <variant>
 
 #pragma warning(push)
@@ -327,6 +328,7 @@ namespace
     const uint8_t version;
     const RequestCode code;
     const uint32_t payload_size;
+    static constexpr size_t header_size = sizeof(client_id) + sizeof(version) + sizeof(code) + sizeof(payload_size);
 
     Request(ClientID client_id, RequestCode code, uint32_t payload_size)
         : client_id(client_id), version(maman15::Client::version), code(code), payload_size(payload_size){};
@@ -336,26 +338,21 @@ namespace
     Request &operator=(const Request &) = delete;
     Request(Request &&) = default;
     Request &operator=(Request &&) = default;
+    ~Request() = default;
 
-    virtual ~Request() = default;
-
-    virtual const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
+    const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
-      SOCKET_WRITE_OR_RETURN(&this->version, sizeof(version) + sizeof(code), false, "Failed to write response: ", error.message());
+      SOCKET_WRITE_OR_RETURN(&this->client_id, header_size, false, "Failed to write response: ", error.message());
 
       return true;
     }
 
-    virtual void print(std::ostream &os) const
-    {
-      os << client_id << '\n';
-      os << "version: " << static_cast<uint16_t>(version) << '\n';
-      os << "code: " << static_cast<uint16_t>(code) << '\n';
-    }
-
     friend std::ostream &operator<<(std::ostream &os, const Request &request)
     {
-      request.print(os);
+      os << '\t' << request.client_id << '\n'
+         << '\t' << "version: " << static_cast<uint16_t>(request.version) << '\n'
+         << '\t' << "code: " << static_cast<uint16_t>(request.code) << '\n'
+         << '\t' << "payload_size: " << request.payload_size << '\n';
       return os;
     }
   };
@@ -377,8 +374,7 @@ namespace
     Response &operator=(const Response &) = delete;
     Response(Response &&) = default;
     Response &operator=(Response &&) = default;
-
-    virtual ~Response() = default;
+    ~Response() = default;
 
     static const std::optional<std::tuple<uint8_t, ResponseCode, uint32_t>> read_response_header(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
     {
@@ -402,15 +398,11 @@ namespace
       return std::make_tuple(data.server_version, data.code, data.payload_size);
     }
 
-    virtual void print(std::ostream &os) const
-    {
-      os << "version: " << static_cast<uint16_t>(server_version) << '\n';
-      os << "code: " << static_cast<uint16_t>(code) << '\n';
-    }
-
     friend std::ostream &operator<<(std::ostream &os, const Response &response)
     {
-      response.print(os);
+      os << '\t' << "version: " << static_cast<uint16_t>(response.server_version) << '\n'
+         << '\t' << "code: " << static_cast<uint16_t>(response.code) << '\n'
+         << '\t' << "payload_size: " << response.payload_size << '\n';
       return os;
     }
   };
@@ -425,6 +417,12 @@ namespace
   public:
     explicit ResponseSuccessSignUp(uint8_t server_version, ClientID client_id)
         : Response(server_version, ResponseCode::sign_up_succeeded, payload_size), client_id(client_id){};
+
+    friend std::ostream &operator<<(std::ostream &os, const ResponseSuccessSignUp &response)
+    {
+      os << '\t' << "client_id: " << response.client_id << '\n';
+      return os;
+    }
   };
 
   class ResponseFailureSignUp final : public Response
@@ -434,6 +432,11 @@ namespace
   public:
     explicit ResponseFailureSignUp(uint8_t server_version)
         : Response(server_version, ResponseCode::sign_up_failed, payload_size){};
+
+    friend std::ostream &operator<<(std::ostream &os, const ResponseFailureSignUp &response)
+    {
+      return os;
+    }
   };
 
   class ResponseSuccessPublicKey final : public Response
@@ -445,6 +448,13 @@ namespace
   public:
     explicit ResponseSuccessPublicKey(uint8_t server_version, ClientID client_id, std::array<uint8_t, 256> aes_key)
         : Response(server_version, ResponseCode::public_key_received, payload_size), client_id(client_id), aes_key(std::move(aes_key)){};
+
+    friend std::ostream &operator<<(std::ostream &os, const ResponseSuccessPublicKey &response)
+    {
+      os << '\t' << "client_id: " << response.client_id << '\n'
+         << '\t' << "aes_key: " << response.aes_key.data() << '\n';
+      return os;
+    }
   };
 
   class ResponseSuccessCRCValid final : public Response
@@ -458,6 +468,15 @@ namespace
   public:
     explicit ResponseSuccessCRCValid(uint8_t server_version, ClientID client_id, uint32_t content_size, std::array<uint8_t, 255> filename, uint32_t ckcsum)
         : Response(server_version, ResponseCode::crc_valid, payload_size), client_id(client_id), content_size(content_size), filename(std::move(filename)), ckcsum(ckcsum){};
+
+    friend std::ostream &operator<<(std::ostream &os, const ResponseSuccessCRCValid &response)
+    {
+      os << '\t' << "client_id: " << response.client_id << '\n'
+         << '\t' << "content_size: " << response.content_size << '\n'
+         << '\t' << "filename: " << response.filename.data() << '\n'
+         << '\t' << "ckcsum: " << response.ckcsum << '\n';
+      return os;
+    }
   };
 
   class ResponseSuccessMessageReceived final : public Response
@@ -468,6 +487,12 @@ namespace
   public:
     explicit ResponseSuccessMessageReceived(uint8_t server_version, ClientID client_id)
         : Response(server_version, ResponseCode::message_received, payload_size), client_id(client_id){};
+
+    friend std::ostream &operator<<(std::ostream &os, const ResponseSuccessMessageReceived &response)
+    {
+      os << '\t' << "client_id: " << response.client_id << '\n';
+      return os;
+    }
   };
 
   class ResponseSuccessSignInAllowed final : public Response
@@ -479,6 +504,13 @@ namespace
   public:
     explicit ResponseSuccessSignInAllowed(uint8_t server_version, ClientID client_id, std::array<uint8_t, 256> aes_key)
         : Response(server_version, ResponseCode::sign_in_allowed, payload_size), client_id(client_id), aes_key(std::move(aes_key)){};
+
+    friend std::ostream &operator<<(std::ostream &os, const ResponseSuccessSignInAllowed &response)
+    {
+      os << '\t' << "client_id: " << response.client_id << '\n'
+         << '\t' << "aes_key: " << response.aes_key.data() << '\n';
+      return os;
+    }
   };
 
   class ResponseFailureSignInRejected final : public Response
@@ -489,6 +521,12 @@ namespace
   public:
     explicit ResponseFailureSignInRejected(uint8_t server_version, ClientID client_id)
         : Response(server_version, ResponseCode::sign_in_rejected, payload_size), client_id(client_id){};
+
+    friend std::ostream &operator<<(std::ostream &os, const ResponseFailureSignInRejected &response)
+    {
+      os << '\t' << "client_id: " << response.client_id << '\n';
+      return os;
+    }
   };
 
   class ResponseErrorGeneral final : public Response
@@ -498,6 +536,11 @@ namespace
   public:
     explicit ResponseErrorGeneral(uint8_t server_version)
         : Response(server_version, ResponseCode::general_error, payload_size){};
+
+    friend std::ostream &operator<<(std::ostream &os, const ResponseErrorGeneral &response)
+    {
+      return os;
+    }
   };
 
   // Request concrete classs (final, non-abstract)
@@ -510,6 +553,19 @@ namespace
   public:
     explicit RequestSignUp(ClientID client_id, std::array<uint8_t, 255> name)
         : Request(client_id, RequestCode::sign_up, payload_size), name(std::move(name)){};
+
+    const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
+    {
+      SOCKET_WRITE_OR_RETURN(&this->name, sizeof(name), false, "Failed to write response: ", error.message());
+
+      return true;
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, const RequestSignUp &request)
+    {
+      os << '\t' << "name: " << request.name.data() << '\n';
+      return os;
+    }
   };
 
   class RequestSendPublicKey final : public Request
@@ -521,6 +577,20 @@ namespace
   public:
     explicit RequestSendPublicKey(ClientID client_id, std::array<uint8_t, 255> name, std::array<uint8_t, 160> public_key)
         : Request(client_id, RequestCode::send_public_key, payload_size), name(std::move(name)), public_key(std::move(public_key)){};
+
+    const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
+    {
+      SOCKET_WRITE_OR_RETURN(&this->name, payload_size, false, "Failed to write response: ", error.message());
+
+      return true;
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, const RequestSendPublicKey &request)
+    {
+      os << '\t' << "name: " << request.name.data() << '\n'
+         << '\t' << "public_key: " << request.public_key.data() << '\n';
+      return os;
+    }
   };
 
   class RequestSignIn final : public Request
@@ -531,6 +601,19 @@ namespace
   public:
     explicit RequestSignIn(ClientID client_id, std::array<uint8_t, 255> name)
         : Request(client_id, RequestCode::sign_in, payload_size), name(name){};
+
+    const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
+    {
+      SOCKET_WRITE_OR_RETURN(&this->name, payload_size, false, "Failed to write response: ", error.message());
+
+      return true;
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, const RequestSignIn &request)
+    {
+      os << '\t' << "name: " << request.name.data() << '\n';
+      return os;
+    }
   };
 
   class RequestSendFile final : public Request
@@ -545,6 +628,25 @@ namespace
   public:
     explicit RequestSendFile(ClientID client_id, uint32_t content_size, uint32_t orig_file_size, uint32_t packet_number_and_total_packets, std::array<uint8_t, 255> filename, std::vector<uint8_t> content)
         : Request(client_id, RequestCode::send_file, payload_size_without_content + content_size), content_size(content_size), orig_file_size(orig_file_size), packet_number_and_total_packets(packet_number_and_total_packets), filename(std::move(filename)), content(std::move(content)){};
+
+    const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
+    {
+      SOCKET_WRITE_OR_RETURN(&this->content_size, payload_size_without_content, false, "Failed to write response: ", error.message());
+
+      SOCKET_WRITE_OR_RETURN(this->content.data(), this->content.size(), false, "Failed to write response: ", error.message());
+
+      return true;
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, const RequestSendFile &request)
+    {
+      os << '\t' << "content_size: " << request.content_size << '\n'
+         << '\t' << "orig_file_size: " << request.orig_file_size << '\n'
+         << '\t' << "packet_number_and_total_packets: " << request.packet_number_and_total_packets << '\n'
+         << '\t' << "filename: " << request.filename.data() << '\n'
+         << '\t' << "content: " << request.content.data() << '\n';
+      return os;
+    }
   };
 
   class RequestCRCValid final : public Request
@@ -555,6 +657,19 @@ namespace
   public:
     explicit RequestCRCValid(ClientID client_id, std::array<uint8_t, 255> filename)
         : Request(client_id, RequestCode::crc_valid, payload_size), filename(std::move(filename)){};
+
+    const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
+    {
+      SOCKET_WRITE_OR_RETURN(&this->filename, payload_size, false, "Failed to write response: ", error.message());
+
+      return true;
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, const RequestCRCValid &request)
+    {
+      os << '\t' << "filename: " << request.filename.data() << '\n';
+      return os;
+    }
   };
 
   class RequestCRCInvalid final : public Request
@@ -565,6 +680,19 @@ namespace
   public:
     explicit RequestCRCInvalid(ClientID client_id, std::array<uint8_t, 255> filename)
         : Request(client_id, RequestCode::crc_invalid, payload_size), filename(std::move(filename)){};
+
+    const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
+    {
+      SOCKET_WRITE_OR_RETURN(&this->filename, payload_size, false, "Failed to write response: ", error.message());
+
+      return true;
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, const RequestCRCInvalid &request)
+    {
+      os << '\t' << "filename: " << request.filename.data() << '\n';
+      return os;
+    }
   };
 
   class RequestCRCInvalid4thTime final : public Request
@@ -575,63 +703,50 @@ namespace
   public:
     explicit RequestCRCInvalid4thTime(ClientID client_id, std::array<uint8_t, 255> filename)
         : Request(client_id, RequestCode::crc_invalid_4th_time, payload_size), filename(std::move(filename)){};
+
+    const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
+    {
+      SOCKET_WRITE_OR_RETURN(&this->filename, payload_size, false, "Failed to write response: ", error.message());
+
+      return true;
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, const RequestCRCInvalid4thTime &request)
+    {
+      os << '\t' << "filename: " << request.filename.data() << '\n';
+      return os;
+    }
   };
 
   // Requests & Responses IO
 
-  const bool send_request(const Request &request, const boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+  template <typename FullRequest>
+  typename std::enable_if<std::is_base_of<Request, FullRequest>::value && !std::is_same<Request, FullRequest>::value, bool>::type
+  send_request(const FullRequest &request, const boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
   {
-    struct Visitor
+    if (!request.Request::write_to_socket(socket, error))
     {
-      bool operator()(const RequestSignUp &request)
-      {
-        log("Sending sign up request");
-        return true;
-      }
-      bool operator()(const RequestSendPublicKey &request)
-      {
-        log("Sending public key request");
-        return true;
-      }
-      bool operator()(const RequestSignIn &request)
-      {
-        log("Sending sign in request");
-        return true;
-      }
-      bool operator()(const RequestSendFile &request)
-      {
-        log("Sending file request");
-        return true;
-      }
-      bool operator()(const RequestCRCValid &request)
-      {
-        log("Sending CRC valid request");
-        return true;
-      }
-      bool operator()(const RequestCRCInvalid &request)
-      {
-        log("Sending CRC invalid request");
-        return true;
-      }
-      bool operator()(const RequestCRCInvalid4thTime &request)
-      {
-        log("Sending CRC invalid for the 4th time request");
-        return true;
-      }
-      bool operator()(const Request &request) = delete;
-    };
+      return false;
+    }
 
-    std::variant<
-        std::reference_wrapper<const RequestSignUp>,
-        std::reference_wrapper<const RequestSendPublicKey>,
-        std::reference_wrapper<const RequestSignIn>,
-        std::reference_wrapper<const RequestSendFile>,
-        std::reference_wrapper<const RequestCRCValid>,
-        std::reference_wrapper<const RequestCRCInvalid>,
-        std::reference_wrapper<const RequestCRCInvalid4thTime>,
-        std::reference_wrapper<const Request>>
-        variant = request;
-    return std::visit(Visitor{}, variant);
+    if (!request.write_to_socket(socket, error))
+    {
+      return false;
+    }
+
+    return true;
+  }
+
+  template <typename FullRequest>
+  typename std::enable_if<std::is_base_of<Request, FullRequest>::value && !std::is_same<Request, FullRequest>::value, std::ostream &>::type
+  operator<<(std::ostream &os, const FullRequest &request)
+  {
+    os << "Header:\n"
+       << static_cast<const Request &>(request)
+       << "Payload:\n"
+       << static_cast<const FullRequest &>(request);
+
+    return os;
   }
 
   const std::unique_ptr<Response> read_response(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
