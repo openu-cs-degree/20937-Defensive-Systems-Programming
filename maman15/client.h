@@ -310,7 +310,17 @@ namespace
     uint64_t upper;
     friend std::ostream &operator<<(std::ostream &os, const ClientID &client_id)
     {
-      os << "client_id: " << client_id.upper << client_id.lower;
+      os << client_id.upper << client_id.lower;
+      return os;
+    }
+  };
+
+  struct AESKey
+  {
+    std::array<uint8_t, 256> key;
+    friend std::ostream &operator<<(std::ostream &os, const AESKey &aes_key)
+    {
+      os << aes_key.key.data();
       return os;
     }
   };
@@ -433,7 +443,7 @@ namespace
     explicit ResponseFailureSignUp(uint8_t server_version)
         : Response(server_version, ResponseCode::sign_up_failed, payload_size){};
 
-    friend std::ostream &operator<<(std::ostream &os, const ResponseFailureSignUp &response)
+    friend std::ostream &operator<<(std::ostream &os, [[maybe_unused]] const ResponseFailureSignUp &response)
     {
       return os;
     }
@@ -442,17 +452,17 @@ namespace
   class ResponseSuccessPublicKey final : public Response
   {
     ClientID client_id;
-    std::array<uint8_t, 256> aes_key; // TODO: replace with AES key class
+    AESKey aes_key;
     static constexpr uint32_t payload_size = sizeof(client_id) + sizeof(aes_key);
 
   public:
-    explicit ResponseSuccessPublicKey(uint8_t server_version, ClientID client_id, std::array<uint8_t, 256> aes_key)
+    explicit ResponseSuccessPublicKey(uint8_t server_version, ClientID client_id, AESKey aes_key)
         : Response(server_version, ResponseCode::public_key_received, payload_size), client_id(client_id), aes_key(std::move(aes_key)){};
 
     friend std::ostream &operator<<(std::ostream &os, const ResponseSuccessPublicKey &response)
     {
       os << '\t' << "client_id: " << response.client_id << '\n'
-         << '\t' << "aes_key: " << response.aes_key.data() << '\n';
+         << '\t' << "aes_key: " << response.aes_key << '\n';
       return os;
     }
   };
@@ -498,17 +508,17 @@ namespace
   class ResponseSuccessSignInAllowed final : public Response
   {
     ClientID client_id;
-    std::array<uint8_t, 256> aes_key; // TODO: replace with AES key class, merge with ResponseSuccessPublicKey
+    AESKey aes_key; // TODO: merge with ResponseSuccessPublicKey?
     static constexpr uint32_t payload_size = sizeof(client_id) + sizeof(aes_key);
 
   public:
-    explicit ResponseSuccessSignInAllowed(uint8_t server_version, ClientID client_id, std::array<uint8_t, 256> aes_key)
+    explicit ResponseSuccessSignInAllowed(uint8_t server_version, ClientID client_id, AESKey aes_key)
         : Response(server_version, ResponseCode::sign_in_allowed, payload_size), client_id(client_id), aes_key(std::move(aes_key)){};
 
     friend std::ostream &operator<<(std::ostream &os, const ResponseSuccessSignInAllowed &response)
     {
       os << '\t' << "client_id: " << response.client_id << '\n'
-         << '\t' << "aes_key: " << response.aes_key.data() << '\n';
+         << '\t' << "aes_key: " << response.aes_key << '\n';
       return os;
     }
   };
@@ -537,7 +547,7 @@ namespace
     explicit ResponseErrorGeneral(uint8_t server_version)
         : Response(server_version, ResponseCode::general_error, payload_size){};
 
-    friend std::ostream &operator<<(std::ostream &os, const ResponseErrorGeneral &response)
+    friend std::ostream &operator<<(std::ostream &os, [[maybe_unused]] const ResponseErrorGeneral &response)
     {
       return os;
     }
@@ -769,7 +779,7 @@ namespace
     }
     if (code == ResponseCode::public_key_received)
     {
-      return std::make_unique<ResponseSuccessPublicKey>(server_version, ClientID{}, std::array<uint8_t, 256>{});
+      return std::make_unique<ResponseSuccessPublicKey>(server_version, ClientID{}, AESKey{});
     }
     if (code == ResponseCode::crc_valid)
     {
@@ -781,7 +791,7 @@ namespace
     }
     if (code == ResponseCode::sign_in_allowed)
     {
-      return std::make_unique<ResponseSuccessSignInAllowed>(server_version, ClientID{}, std::array<uint8_t, 256>{});
+      return std::make_unique<ResponseSuccessSignInAllowed>(server_version, ClientID{}, AESKey{});
     }
     if (code == ResponseCode::sign_in_rejected)
     {
