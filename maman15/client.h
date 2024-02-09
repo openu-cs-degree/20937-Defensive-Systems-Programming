@@ -324,6 +324,16 @@ namespace
     }
   };
 
+  struct PublicKey
+  {
+    std::array<uint8_t, 160> key;
+    friend std::ostream &operator<<(std::ostream &os, const PublicKey &public_key)
+    {
+      os << public_key.key.data();
+      return os;
+    }
+  };
+
   // forward declare Response so that it can be used in Request::process()
 
   class Response;
@@ -507,7 +517,7 @@ namespace
   class ResponseSuccessSignInAllowed final : public Response
   {
     ClientID client_id;
-    AESKey aes_key; // TODO: merge with ResponseSuccessPublicKey?
+    AESKey aes_key;
     static constexpr uint32_t payload_size = sizeof(client_id) + sizeof(aes_key);
 
   public:
@@ -580,11 +590,11 @@ namespace
   class RequestSendPublicKey final : public Request
   {
     Name name;
-    std::array<uint8_t, 160> public_key; // TODO: replace with public key class
+    PublicKey public_key;
     static constexpr uint32_t payload_size = sizeof(name) + sizeof(public_key);
 
   public:
-    explicit RequestSendPublicKey(ClientID client_id, Name name, std::array<uint8_t, 160> public_key)
+    explicit RequestSendPublicKey(ClientID client_id, Name name, PublicKey public_key)
         : Request(client_id, RequestCode::send_public_key, payload_size), name(std::move(name)), public_key(std::move(public_key)){};
 
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
@@ -597,7 +607,7 @@ namespace
     friend std::ostream &operator<<(std::ostream &os, const RequestSendPublicKey &request)
     {
       os << '\t' << "name: " << request.name << '\n'
-         << '\t' << "public_key: " << request.public_key.data() << '\n';
+         << '\t' << "public_key: " << request.public_key << '\n';
       return os;
     }
   };
