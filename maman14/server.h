@@ -191,33 +191,38 @@ namespace
 
   class Payload
   {
-    uint32_t size;
-    std::unique_ptr<uint8_t[]> content;
+    std::vector<uint8_t> content;
 
   private:
-    Payload() = default;
+    Payload(std::vector<uint8_t> content)
+        : content(std::move(content)){};
 
   public:
+    Payload() = delete;
     Payload(const Payload &) = delete;
     Payload &operator=(const Payload &) = delete;
     Payload(Payload &&) = default;
     Payload &operator=(Payload &&) = default;
     ~Payload() = default;
 
-    Payload(uint32_t size, std::unique_ptr<uint8_t[]> content)
-        : size(size), content(std::move(content)){};
-
-    explicit Payload(const std::string &content)
-        : size(static_cast<uint32_t>(content.size())), content(std::make_unique<uint8_t[]>(size))
+    static std::optional<Payload> from_vector(std::vector<uint8_t> content)
     {
-      std::copy(content.begin(), content.end(), this->content.get());
+      if (content.size() > std::numeric_limits<uint32_t>::max())
+      {
+        log("Payload is too long: ", content.size());
+        return std::nullopt;
+      }
+
+      return Payload(content);
     }
 
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
+      uint32_t size = static_cast<uint32_t>(content.size());
+
       SOCKET_WRITE_OR_RETURN(&size, sizeof(size), false, "Failed to write payload size: ", error.message());
 
-      SOCKET_WRITE_OR_RETURN(content.get(), size, false, "Failed to write payload content: ", error.message());
+      SOCKET_WRITE_OR_RETURN(content.data(), size, false, "Failed to write payload content: ", error.message());
 
       return true;
     };
@@ -231,7 +236,7 @@ namespace
         return false;
       }
 
-      file.write(reinterpret_cast<const char *>(content.get()), size);
+      file.write(reinterpret_cast<const char *>(content.data()), content.size());
       if (!file)
       {
         log("Failed to write to file: ", file_path);
@@ -243,15 +248,15 @@ namespace
 
     static const std::optional<Payload> read_from_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
     {
-      Payload payload;
+      uint32_t size;
 
-      SOCKET_READ_OR_RETURN(&payload.size, sizeof(payload.size), {}, "Failed to read payload size: ", error.message());
+      SOCKET_READ_OR_RETURN(&size, sizeof(size), {}, "Failed to read payload size: ", error.message());
 
-      payload.content = std::make_unique<uint8_t[]>(payload.size);
+      std::vector<uint8_t> content(size);
 
-      SOCKET_READ_OR_RETURN(payload.content.get(), payload.size, {}, "Failed to read payload content: ", error.message());
+      SOCKET_READ_OR_RETURN(content.data(), size, {}, "Failed to read payload content: ", error.message());
 
-      return payload;
+      return std::make_optional<Payload>(std::move(content));
     };
 
     static const std::optional<Payload> read_from_file(const std::filesystem::path &file_path)
@@ -272,24 +277,25 @@ namespace
         return {};
       }
 
-      std::unique_ptr<uint8_t[]> content(new uint8_t[static_cast<uint32_t>(size)]);
-      file.read(reinterpret_cast<char *>(content.get()), size);
+      std::vector<uint8_t> content(static_cast<uint32_t>(size));
+      file.read(reinterpret_cast<char *>(content.data()), size);
       if (!file)
       {
         log("Failed to read file: ", file_path);
         return {};
       }
 
-      return std::make_optional<Payload>(static_cast<uint32_t>(size), std::move(content));
+      return std::make_optional<Payload>(std::move(content));
     }
 
     friend std::ostream &operator<<(std::ostream &os, const Payload &payload)
     {
       static constexpr uint32_t MAX_PAYLOAD_PRINT_SIZE = 69;
+      const uint32_t size = payload.content.size();
 
-      os << "payload size: " << payload.size << '\n';
-      os << (payload.size > MAX_PAYLOAD_PRINT_SIZE ? "payload (printing limited to 69 bytes):\n" : "payload:\n")
-         << std::string_view(reinterpret_cast<const char *>(payload.content.get()), std::min(payload.size, MAX_PAYLOAD_PRINT_SIZE)) << '\n';
+      os << "payload size: " << size << '\n';
+      os << (size > MAX_PAYLOAD_PRINT_SIZE ? "payload (printing limited to 69 bytes):\n" : "payload:\n")
+         << std::string_view(reinterpret_cast<const char *>(payload.content.data()), std::min(size, MAX_PAYLOAD_PRINT_SIZE)) << '\n';
 
       return os;
     }
@@ -297,82 +303,90 @@ namespace
 
   class Filename
   {
-    uint16_t name_len;
-    std::unique_ptr<char[]> content;
+    std::vector<char> content;
 
   private:
-    Filename() = default;
+    Filename(std::vector<char> content)
+        : content(std::move(content)){};
 
   public:
+    Filename() = delete;
     Filename(const Filename &) = delete;
     Filename &operator=(const Filename &) = delete;
     Filename(Filename &&) = default;
     Filename &operator=(Filename &&) = default;
     ~Filename() = default;
 
-    explicit Filename(const std::string_view &filename)
-        : name_len(static_cast<uint16_t>(filename.size())), content(std::make_unique<char[]>(name_len))
+    static std::optional<Filename> from_vector(const std::vector<char> filename)
     {
-      std::move(filename.begin(), filename.end(), this->content.get());
+      if (filename.size() > std::numeric_limits<uint16_t>::max())
+      {
+        log("Filename is too long: ", filename.size());
+        return std::nullopt;
+      }
+
+      return Filename(filename);
     }
 
     const std::string_view get_name() const
     {
-      return std::string_view(content.get(), name_len);
+      return std::string_view(content.data(), content.size());
     }
 
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
+      uint16_t name_len = static_cast<uint16_t>(content.size());
+
       SOCKET_WRITE_OR_RETURN(&name_len, sizeof(name_len), false, "Failed to write name_len: ", error.message());
 
-      SOCKET_WRITE_OR_RETURN(content.get(), name_len, false, "Failed to write filename: ", error.message());
+      SOCKET_WRITE_OR_RETURN(content.data(), name_len, false, "Failed to write filename: ", error.message());
 
       return true;
     }
 
     static const std::optional<Filename> read_from_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
     {
-      Filename filename;
+      uint16_t name_len;
 
-      SOCKET_READ_OR_RETURN(&filename.name_len, sizeof(filename.name_len), std::nullopt, "Failed to read name_len: ", error.message());
+      SOCKET_READ_OR_RETURN(&name_len, sizeof(name_len), std::nullopt, "Failed to read name_len: ", error.message());
 
-      if (filename.name_len == 0)
+      if (name_len == 0)
       {
         log("name_len can't be 0");
         return std::nullopt;
       }
 
-      filename.content = std::make_unique<char[]>(filename.name_len);
+      std::vector<char> content(name_len);
 
-      SOCKET_READ_OR_RETURN(filename.content.get(), filename.name_len, std::nullopt, "Failed to read filename: ", error.message());
+      SOCKET_READ_OR_RETURN(content.data(), name_len, std::nullopt, "Failed to read filename: ", error.message());
 
-      if (!filename.is_filename_valid())
+      if (!is_filename_valid(content))
       {
-        log("Invalid filename: ", filename.get_name());
+        log("Invalid filename: ", content.data());
         return std::nullopt;
       }
 
-      return filename;
+      return std::make_optional<Filename>(std::move(content));
     }
 
     friend std::ostream &operator<<(std::ostream &os, const Filename &filename)
     {
-      os << "name_len: " << filename.name_len << '\n';
-      os << "filename: " << filename.get_name() << '\n';
+      os << "name_len: " << filename.content.size() << '\n';
+      os << "filename: " << filename.content.data() << '\n';
       return os;
     }
 
   private:
-    const bool is_filename_valid() const
+    const static bool is_filename_valid(std::vector<char> &content)
     {
       static constexpr std::initializer_list<char> forbidden_start_char = {' '};
       static constexpr std::initializer_list<char> forbidden_middle_chars = {'\0', '/', '\\', ':', '*', '?', '"', '<', '>', '|'};
       static constexpr std::initializer_list<char> forbidden_end_char = {' ', '.'};
 
       return std::none_of(forbidden_start_char.begin(), forbidden_start_char.end(), [&](char c) { return content[0] == c; }) &&
-             std::none_of(forbidden_end_char.begin(), forbidden_end_char.end(), [&](char c) { return content[name_len - 1] == c; }) &&
-             std::none_of(content.get(), content.get() + name_len, [&](char c) { return std::any_of(
-                                                                                     forbidden_middle_chars.begin(), forbidden_middle_chars.end(), [&](char f) { return f == c; }); });
+             std::none_of(forbidden_end_char.begin(), forbidden_end_char.end(), [&](char c) { return content[content.size() - 1] == c; }) &&
+             std::none_of(content.begin(), content.end(), [&](char c) { return std::any_of(
+                                                                            forbidden_middle_chars.begin(), forbidden_middle_chars.end(), [&](char f) { return f == c; }); });
     }
   };
 
@@ -751,70 +765,47 @@ namespace
       }
 
       const auto user_file_name = generate_random_file_name();
-      std::filesystem::path user_file_path = user_dir_path / user_file_name;
 
-      auto file = create_and_get_user_file(user_file_path);
-      if (!file)
+      auto filename = Filename::from_vector(user_file_name);
+      if (!filename)
       {
         return std::make_unique<ResponseErrorGeneral>();
       }
 
-      auto payload = write_directory_to_file(user_dir_path, user_file_name, file.value());
+      auto payload = create_payload(user_dir_path);
       if (!payload)
       {
         return std::make_unique<ResponseErrorGeneral>();
       }
 
-      return std::make_unique<ResponseSuccessList>(Filename(user_file_name), std::move(payload.value()));
+      return std::make_unique<ResponseSuccessList>(std::move(filename.value()), std::move(payload.value()));
     }
 
   private:
-    const std::string generate_random_file_name() const
+    const std::vector<char> generate_random_file_name() const
     {
       static constexpr uint16_t length = 32;
       auto generate_random_character = []() -> char {
         static constexpr std::string_view characters = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
         return characters[rand() % characters.size()];
       };
-      std::string random_string(length, 0);
+      std::vector<char> random_string(length, 0);
       std::generate_n(random_string.begin(), length, generate_random_character);
       return random_string;
     }
 
-    std::optional<std::fstream> create_and_get_user_file(const std::filesystem::path &file_path) const
+    const std::optional<Payload> create_payload(const std::filesystem::path &src_path) const
     {
-      std::fstream file(file_path, std::ios::in | std::ios::out | std::ios::trunc);
-      if (!file)
+      std::vector<uint8_t> content_vector;
+
+      for (const auto &entry : std::filesystem::directory_iterator(src_path))
       {
-        log("Failed to create file: ", file_path);
-        return std::nullopt;
+        auto filename = entry.path().filename().string();
+        content_vector.insert(content_vector.end(), filename.begin(), filename.end());
+        content_vector.push_back('\n');
       }
 
-      return file;
-    }
-
-    const std::optional<Payload> write_directory_to_file(const std::filesystem::path &src_path, const std::string_view &ignored_filename, std::fstream &dst_file) const
-    {
-      std::ostringstream oss;
-      std::for_each(std::filesystem::directory_iterator(src_path),
-                    std::filesystem::directory_iterator(),
-                    [&](const auto &entry) {
-                      if (auto filename = entry.path().filename().string(); filename != ignored_filename)
-                      {
-                        oss << filename << '\n';
-                      }
-                    });
-
-      std::string content = oss.str();
-      if (auto file_size = content.size(); file_size > std::numeric_limits<uint32_t>::max())
-      {
-        log("File size is too big: ", file_size);
-        return std::nullopt;
-      }
-
-      dst_file << content;
-
-      return Payload{content};
+      return Payload::from_vector(std::move(content_vector));
     }
   };
 #pragma pack(pop)

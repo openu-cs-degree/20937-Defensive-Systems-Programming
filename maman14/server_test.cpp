@@ -1,14 +1,14 @@
-#include <gtest/gtest.h>
 #include <boost/asio.hpp>
+#include <gtest/gtest.h>
 
+#include <array>
 #include <initializer_list>
 #include <thread>
 #include <vector>
-#include <array>
 
 #define _CRTDBG_MAP_ALLOC
-#include <stdlib.h>
 #include <crtdbg.h>
+#include <stdlib.h>
 
 /*
  * ~~~~~~~~~~~~~~~~~~~~~~~~~ Maman 14 - Server Test ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -103,8 +103,7 @@ namespace
     } while (!error);
 
 #ifdef DEBUG
-    std::for_each(recv_data.begin(), recv_data.end(), [](uint8_t &c)
-                  { std::cout << std::hex << static_cast<int>(c) << " "; });
+    std::for_each(recv_data.begin(), recv_data.end(), [](uint8_t &c) { std::cout << std::hex << static_cast<int>(c) << " "; });
     std::cout << std::endl;
 #endif
 
@@ -196,9 +195,9 @@ TEST_F(ServerTest, RequestsMixed)
   SEND_REQUEST_AND_EXPECT_RESPONSE(request_res_2, resp_no_file_2);
   SEND_REQUEST_AND_EXPECT_RESPONSE(request_del_2, resp_no_file_2);
   SEND_REQUEST_AND_EXPECT_RESPONSE(request_del_1, response_del_1);
-  SEND_REQUEST_AND_EXPECT_RESPONSE(request_del_1, resp_no_file_1);
-  SEND_AND_VALIDATE_LIST_REQUEST(request_lst_0, response_list_payload_0);
-  SEND_REQUEST_AND_EXPECT_RESPONSE(request_res_1, resp_no_file_1);
+  SEND_REQUEST_AND_EXPECT_RESPONSE(request_del_1, resp_no_client);
+  SEND_REQUEST_AND_EXPECT_RESPONSE(request_lst_0, resp_no_client);
+  SEND_REQUEST_AND_EXPECT_RESPONSE(request_res_1, resp_no_client);
 
   // two files
   SEND_REQUEST_AND_EXPECT_RESPONSE(request_sav_1, response_sav_1);
@@ -210,15 +209,15 @@ TEST_F(ServerTest, RequestsMixed)
   SEND_REQUEST_AND_EXPECT_RESPONSE(request_del_1, response_del_1);
   SEND_AND_VALIDATE_LIST_REQUEST(request_lst_0, response_list_payload_2);
   SEND_REQUEST_AND_EXPECT_RESPONSE(request_del_2, response_del_2);
-  SEND_AND_VALIDATE_LIST_REQUEST(request_lst_0, response_list_payload_0);
-  SEND_REQUEST_AND_EXPECT_RESPONSE(request_res_1, resp_no_file_1);
-  SEND_REQUEST_AND_EXPECT_RESPONSE(request_res_2, resp_no_file_2);
-  SEND_REQUEST_AND_EXPECT_RESPONSE(request_del_1, resp_no_file_1);
-  SEND_REQUEST_AND_EXPECT_RESPONSE(request_del_2, resp_no_file_2);
-  SEND_AND_VALIDATE_LIST_REQUEST(request_lst_0, response_list_payload_0);
+  SEND_REQUEST_AND_EXPECT_RESPONSE(request_lst_0, resp_no_client);
+  SEND_REQUEST_AND_EXPECT_RESPONSE(request_res_1, resp_no_client);
+  SEND_REQUEST_AND_EXPECT_RESPONSE(request_res_2, resp_no_client);
+  SEND_REQUEST_AND_EXPECT_RESPONSE(request_del_1, resp_no_client);
+  SEND_REQUEST_AND_EXPECT_RESPONSE(request_del_2, resp_no_client);
+  SEND_REQUEST_AND_EXPECT_RESPONSE(request_lst_0, resp_no_client);
 
   // maman example
-  SEND_AND_VALIDATE_LIST_REQUEST(request_lst_0, response_list_payload_0);  // step 4
+  SEND_REQUEST_AND_EXPECT_RESPONSE(request_lst_0, resp_no_client);         // step 4
   SEND_REQUEST_AND_EXPECT_RESPONSE(request_sav_1, response_sav_1);         // step 5
   SEND_REQUEST_AND_EXPECT_RESPONSE(request_sav_2, response_sav_2);         // step 6
   SEND_AND_VALIDATE_LIST_REQUEST(request_lst_0, response_list_payload_12); // step 7
