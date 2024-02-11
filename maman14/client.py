@@ -393,7 +393,9 @@ def main():
     client.send_request(generator.generate_save_request(filenames[0])) # step 5
     client.send_request(generator.generate_save_request(filenames[1])) # step 6
     client.send_request(generator.generate_list_request()) # step 7
-    client.send_request(generator.generate_restore_request(filenames[0])) # step 8, TODO: save on tmp
+    res = client.send_request(generator.generate_restore_request(filenames[0])) # step 8
+    with open(f"tmp", "wb") as f:
+        f.write(res.payload.payload)
     client.send_request(generator.generate_delete_request(filenames[0])) # step 9
     client.send_request(generator.generate_restore_request(filenames[0])) # step 10
 
