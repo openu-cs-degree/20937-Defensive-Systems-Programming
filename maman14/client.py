@@ -211,7 +211,7 @@ class _ResponseWithFileNameAndPayload(_ResponseWithFileName):
         self.payload = payload
     
     def __str__(self) -> str:
-        return f"Version: {self.version}\nStatus: {self.status}\nName length: {self.filename.name_len}\nFilename: {self.filename.filename}\nPayload size: {self.payload.size}"
+        return super().__str__() + f"\nPayload size: {self.payload.size}"
 
 class ResponseSuccessRestore(_ResponseWithFileNameAndPayload):
     def __init__(self, version: int, filename: Filename, payload: Payload):
@@ -220,6 +220,10 @@ class ResponseSuccessRestore(_ResponseWithFileNameAndPayload):
 class ResponseSuccessList(_ResponseWithFileNameAndPayload):
     def __init__(self, version: int, filename: Filename, payload: Payload):
         super().__init__(version, Status.SUCCESS_LIST, filename, payload)
+
+    def __str__(self) -> str:
+        return super().__str__() + f"\nFiles list:\n{self.payload.payload.decode('utf-8')}"
+    
 
 class FileHandler:
     SERVER_INFO_FILE = "server.info"
@@ -281,7 +285,7 @@ class Client:
         self.ip_address = ip_address
         self.port = port
 
-    def send_request(self, request: Request) -> None:
+    def send_request(self, request: Request) -> Response:
         # send request
         my_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
         my_socket.connect((self.ip_address, self.port))
@@ -294,16 +298,15 @@ class Client:
             if not part:
                 break 
             data += part
-
-        # handle response
         response = self.unpack_response(data)
-        self.handle_response(response)
 
         # bye
+        self.handle_response(response)
         my_socket.close()
+        return response
 
     def handle_response(self, response: Response) -> None:
-        print(response, '\n\n')
+        print(response, '\n')
 
     def unpack_response(self, data: bytes) -> Response:
         if len(data) < 3:
