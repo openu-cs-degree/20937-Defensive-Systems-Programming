@@ -380,7 +380,6 @@ class RequestGenerator:
 def main():
     uniqueIDGenerator = UniqueIDGenerator() 
     unique_id = uniqueIDGenerator.generate_unique_id() # step 1
-    unique_id = 53764 # TODO: remove
 
     reader = FileHandler()
     ip_address, port = reader.read_server_info() # step 2
