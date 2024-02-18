@@ -34,7 +34,7 @@
   - Sign in rejected (client needs to sign up again)
   - General error
 
-  The client is implemented using Boost.Asio, and uses TCP sockets for communication.
+  The client is implemented using Boost 1.84.0 and Crypto++ 8.9.0.
 
   @note The server doesn't handle endianess, as for most modern systems are assumed to
         be little endian, which is the requested endianess to be used.
@@ -846,83 +846,6 @@ namespace
   }
 #pragma pack(pop)
 } // anonymous namespace
-#pragma endregion
-
-#pragma region implementation_client
-// +----------------------------------------------------------------------------------+
-// | Implementation of the slient, which should not be protocol dependent             |
-// +----------------------------------------------------------------------------------+
-namespace
-{
-  const bool clear_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
-  {
-    boost::asio::streambuf discard_buffer;
-    while (socket.available())
-    {
-      socket.read_some(discard_buffer.prepare(socket.available()), error);
-      discard_buffer.commit(socket.available());
-      if (error)
-      {
-        return false;
-      }
-    }
-    return true;
-  }
-} // anonymous namespace
-#pragma endregion
-
-#pragma region implementation_interface
-// +----------------------------------------------------------------------------------+
-// | Implementation of the functions that were declared on #pragma interface          |
-// +----------------------------------------------------------------------------------+
-namespace maman15
-{
-  Client::Client()
-      : socket(io_context), acceptor(io_context)
-  {
-    log("Client created");
-  }
-
-  bool Client::register_to_server()
-  {
-    log("Registering to server");
-    return true;
-  }
-
-  bool Client::send_public_key()
-  {
-    log("Sending public key");
-    return true;
-  }
-
-  bool Client::send_file(const std::filesystem::path &file_path)
-  {
-    log("Sending file: ", file_path);
-    return true;
-  }
-
-  bool Client::validate_crc()
-  {
-    log("Validating CRC");
-    return true;
-  }
-
-  bool Client::clear_socket()
-  {
-    boost::system::error_code error;
-    boost::asio::streambuf discard_buffer;
-    while (socket.available())
-    {
-      socket.read_some(discard_buffer.prepare(socket.available()), error);
-      discard_buffer.commit(socket.available());
-      if (error)
-      {
-        return false;
-      }
-    }
-    return true;
-  }
-} // namespace maman15
 #pragma endregion
 
 #pragma region cleanup
