@@ -60,6 +60,7 @@
 // | Inlcudes: Standard Library and Boost                                             |
 // +----------------------------------------------------------------------------------+
 #include <algorithm>
+#include <charconv>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -225,6 +226,7 @@ namespace
   {
     static constexpr size_t name_len = 255;
     std::array<char, name_len> name;
+    // TODO: name_len and max_name_len?
 
   private:
   public:
@@ -235,9 +237,9 @@ namespace
     NameBase &operator=(NameBase &&) = default;
     ~NameBase() = default;
 
-    const std::string_view get_name() const
+    const std::string get_name() const
     {
-      return std::string_view(name.data(), name.size());
+      return std::string(name.data(), name.size());
     }
 
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
@@ -247,9 +249,10 @@ namespace
       return true;
     }
 
+    // TODO: return std::optional<NameBase> or std::optional<NameBase<Trait>>?
     static const std::optional<NameBase> read_from_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
     {
-      NameBase name;
+      NameBase name{};
 
       SOCKET_READ_OR_RETURN(&name, name_len, std::nullopt, "Failed to read " + Trait::type_name + ": ", error.message());
 
@@ -262,51 +265,88 @@ namespace
       return name;
     }
 
+    static const std::optional<NameBase<Trait>> from_string(const std::string &str)
+    {
+      NameBase name{};
+
+      if (!Trait::is_valid(str))
+      {
+        log("Invalid ", Trait::type_name, ": ", str);
+        return std::nullopt;
+      }
+
+      std::copy(str.begin(), str.end(), name.name.begin());
+
+      return name;
+    }
+
     friend std::ostream &operator<<(std::ostream &os, const NameBase &name)
     {
       os << Trait::type_name << ": " << name.get_name() << '\n';
       return os;
     }
+
+    // TODO: make private is_valid(const std::string &str), check that len <= 255
   };
 
-  struct NameTrait
+  struct ClientNameTrait
   {
     static constexpr char type_name[] = "name";
+    static constexpr size_t min_name_len = 1;
+    static constexpr size_t max_name_len = 100;
 
-    static bool is_valid(const NameBase<NameTrait> &name)
+    // TODO: check more characters? \n etc.?
+    static bool is_valid(const std::string &name)
     {
-      const std::string_view name_view = name.get_name();
-
-      return std::none_of(name_view.begin(), name_view.end() - 1, [](char c) { return c == '\0'; }) &&
-             *(name_view.end() - 1) == '\0';
+      return name.size() >= min_name_len &&
+             name.size() <= max_name_len &&
+             std::none_of(name.begin(), name.end() - 1, [](char c) { return c == '\0'; }) &&
+             *(name.end() - 1) == '\0';
     }
   };
 
   struct FilenameTrait
   {
     static constexpr char type_name[] = "filename";
+    static constexpr size_t min_filename_len = 1;
+    static constexpr size_t max_filename_len = 255;
 
-    static bool is_valid(const NameBase<FilenameTrait> &filename)
+    static bool is_valid(const std::string &filename)
     {
-      const std::string_view name_view = filename.get_name();
-
       static constexpr std::array forbidden_start_char = {' '};
       static constexpr std::array forbidden_middle_chars = {'\0', '/', '\\', ':', '*', '?', '"', '<', '>', '|'};
       static constexpr std::array forbidden_end_char = {' ', '.'};
 
-      return std::none_of(forbidden_start_char.begin(), forbidden_start_char.end(), [&](char c) { return name_view.front() == c; }) &&
-             std::none_of(forbidden_end_char.begin(), forbidden_end_char.end(), [&](char c) { return name_view.back() == c; }) &&
-             std::none_of(name_view.begin(), name_view.end(), [&](char c) { return std::any_of(forbidden_middle_chars.begin(), forbidden_middle_chars.end(), [&](char f) { return f == c; }); });
+      return filename.size() >= min_filename_len &&
+             filename.size() <= max_filename_len &&
+             std::none_of(forbidden_start_char.begin(), forbidden_start_char.end(), [&](char c) { return filename.front() == c; }) &&
+             std::none_of(forbidden_end_char.begin(), forbidden_end_char.end(), [&](char c) { return filename.back() == c; }) &&
+             std::none_of(filename.begin(), filename.end(), [&](char c) { return std::any_of(forbidden_middle_chars.begin(), forbidden_middle_chars.end(), [&](char f) { return f == c; }); });
     }
   };
 
-  using Name = NameBase<NameTrait>;
+  using ClientName = NameBase<ClientNameTrait>;
   using Filename = NameBase<FilenameTrait>;
 
   struct ClientID
   {
     uint64_t lower;
     uint64_t upper;
+    static std::optional<ClientID> from_string(const std::string_view &str)
+    {
+      ClientID client_id;
+      auto res = std::from_chars(str.data(), str.data() + str.size(), client_id.lower, 16);
+      if (res.ec != std::errc())
+      {
+        return std::nullopt;
+      }
+      res = std::from_chars(str.data() + 16, str.data() + 16 + str.size(), client_id.upper, 16);
+      if (res.ec != std::errc())
+      {
+        return std::nullopt;
+      }
+      return client_id;
+    }
     friend std::ostream &operator<<(std::ostream &os, const ClientID &client_id)
     {
       os << client_id.upper << client_id.lower;
@@ -597,12 +637,12 @@ namespace
 
   class RequestSignUp final : public Request
   {
-    Name name;
+    ClientName &name;
     static constexpr uint32_t payload_size = sizeof(name);
 
   public:
-    explicit RequestSignUp(ClientID client_id, Name name)
-        : Request(client_id, RequestCode::sign_up, payload_size), name(std::move(name)){};
+    explicit RequestSignUp(ClientName &name)
+        : Request(ClientID{}, RequestCode::sign_up, payload_size), name(name){};
 
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
@@ -620,12 +660,12 @@ namespace
 
   class RequestSendPublicKey final : public Request
   {
-    Name name;
+    ClientName name;
     PublicKey public_key;
     static constexpr uint32_t payload_size = sizeof(name) + sizeof(public_key);
 
   public:
-    explicit RequestSendPublicKey(ClientID client_id, Name name, PublicKey public_key)
+    explicit RequestSendPublicKey(ClientID client_id, ClientName name, PublicKey public_key)
         : Request(client_id, RequestCode::send_public_key, payload_size), name(std::move(name)), public_key(std::move(public_key)){};
 
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
@@ -645,11 +685,11 @@ namespace
 
   class RequestSignIn final : public Request
   {
-    Name name;
+    ClientName name;
     static constexpr uint32_t payload_size = sizeof(name);
 
   public:
-    explicit RequestSignIn(ClientID client_id, Name name)
+    explicit RequestSignIn(ClientID client_id, ClientName name)
         : Request(client_id, RequestCode::sign_in, payload_size), name(std::move(name)){};
 
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
@@ -772,8 +812,10 @@ namespace
 
   template <typename FullRequest>
   typename std::enable_if<std::is_base_of<Request, FullRequest>::value && !std::is_same<Request, FullRequest>::value, bool>::type
-  send_request(const FullRequest &request, const boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+  send_request(const FullRequest &request, boost::asio::ip::tcp::socket &socket)
   {
+    boost::system::error_code error;
+
     if (!request.Request::write_to_socket(socket, error))
     {
       return false;
