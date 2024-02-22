@@ -158,7 +158,6 @@ namespace maman15
   private:
     boost::asio::io_context io_context;
     boost::asio::ip::tcp::socket socket;
-    boost::asio::ip::tcp::acceptor acceptor;
 
     bool clear_socket();
   };
@@ -685,12 +684,12 @@ namespace
 
   class RequestSignIn final : public Request
   {
-    ClientName name;
+    const ClientName &name;
     static constexpr uint32_t payload_size = sizeof(name);
 
   public:
-    explicit RequestSignIn(ClientID client_id, ClientName name)
-        : Request(client_id, RequestCode::sign_in, payload_size), name(std::move(name)){};
+    explicit RequestSignIn(ClientID client_id, const ClientName &name)
+        : Request(client_id, RequestCode::sign_in, payload_size), name(name){};
 
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
     {
@@ -841,8 +840,10 @@ namespace
     return os;
   }
 
-  const std::unique_ptr<Response> read_response(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+  const std::unique_ptr<Response> receive_response(boost::asio::ip::tcp::socket &socket)
   {
+    boost::system::error_code error;
+
     auto response = Response::read_response_header(socket, error);
     if (!response)
     {

@@ -102,7 +102,7 @@ namespace
 
   struct IdentifierFileContent
   {
-    std::string client_name;
+    ClientName client_name;
     ClientID client_id;
     CryptoPP::RSA::PrivateKey private_key;
 
@@ -121,13 +121,19 @@ namespace
       IdentifierFileContent content;
       std::string line;
 
-      // Read client' name
-      if (!std::getline(file, content.client_name) || content.client_name.length() > 100)
+      // Read client name
+      if (!std::getline(file, line))
       {
         return std::nullopt;
       }
+      auto client_name = ClientName::from_string(line);
+      if (!client_name)
+      {
+        return std::nullopt;
+      }
+      content.client_name = std::move(client_name.value());
 
-      // Read client' uid
+      // Read client uid
       if (!std::getline(file, line))
       {
         return std::nullopt;
@@ -175,7 +181,7 @@ namespace
 namespace maman15
 {
   Client::Client()
-      : socket(io_context), acceptor(io_context)
+      : socket(io_context)
   {
     log("Client created");
   }
@@ -183,7 +189,75 @@ namespace maman15
   bool Client::register_to_server()
   {
     log("Registering to server");
-    return true;
+
+    // Read instructions file
+    if (!std::filesystem::exists(instructions_file_name))
+    {
+      log("Instructions file (", instructions_file_name, ") does not exist.");
+      return false;
+    }
+    auto instructions_file_content = InstructionsFileContent::from_file(instructions_file_name);
+    if (!instructions_file_content)
+    {
+      log("Failed to read transfer file");
+      return false;
+    }
+
+    // Connect to server
+    // TODO: move connection to... c'tor? factory? I don't like factory in this case...
+    boost::asio::ip::tcp::resolver resolver(io_context);
+    boost::asio::ip::tcp::endpoint endpoint(instructions_file_content->ip, instructions_file_content->port);
+    boost::asio::ip::tcp::resolver::results_type endpoints = resolver.resolve(endpoint);
+    boost::asio::connect(socket, endpoints);
+
+    // if identifier exists, sign in
+    if (std::filesystem::exists(identifier_file_name))
+    {
+      auto identifier_file_content = IdentifierFileContent::from_file(identifier_file_name);
+      if (!identifier_file_content)
+      {
+        log("Failed to read me file");
+        return false;
+      }
+
+      if (!send_request(RequestSignIn{identifier_file_content->client_id, identifier_file_content->client_name}, socket))
+      {
+        log("Failed to send client id");
+        return false;
+      }
+      if (auto response = receive_response(socket))
+      {
+        log("Received reponse: ", response);
+        // TODO: handle response
+        return true;
+      }
+      else
+      {
+        log("Failed to receive client id");
+        return false;
+      }
+    }
+    else // sign up
+    {
+      if (!send_request(RequestSignUp{instructions_file_content->client_name}, socket))
+      {
+        log("Failed to send client name");
+        return false;
+      }
+      if (auto response = receive_response(socket))
+      {
+        log("Received reponse: ", response);
+        // TODO: handle response
+        return true;
+      }
+      else
+      {
+        log("Failed to receive client id");
+        return false;
+      }
+    }
+
+    // TODO: move sign_in and sign_up to separate functions?
   }
 
   bool Client::send_public_key()
