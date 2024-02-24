@@ -448,9 +448,9 @@ namespace
 
   // Response base class
 
-  class Response
+  class Response // TODO: change to ResponseHeader?
   {
-  protected:
+  public:
     const uint8_t server_version;
     const ResponseCode code;
     const uint32_t payload_size;
@@ -631,6 +631,16 @@ namespace
       return os;
     }
   };
+
+  using ResponseVariant = std::variant<
+      ResponseSuccessSignUp,
+      ResponseFailureSignUp,
+      ResponseSuccessPublicKey,
+      ResponseSuccessCRCValid,
+      ResponseSuccessMessageReceived,
+      ResponseSuccessSignInAllowed,
+      ResponseFailureSignInRejected,
+      ResponseErrorGeneral>;
 
   // Request concrete classs (final, non-abstract)
 
@@ -840,52 +850,52 @@ namespace
     return os;
   }
 
-  const std::unique_ptr<Response> receive_response(boost::asio::ip::tcp::socket &socket)
+  const std::optional<ResponseVariant> receive_response(boost::asio::ip::tcp::socket &socket)
   {
     boost::system::error_code error;
 
     auto response = Response::read_response_header(socket, error);
     if (!response)
     {
-      return {};
+      return std::nullopt;
     }
 
     auto &[server_version, code, payload_size] = *response;
 
     if (code == ResponseCode::sign_up_succeeded)
     {
-      return std::make_unique<ResponseSuccessSignUp>(server_version, ClientID{});
+      return ResponseSuccessSignUp(server_version, ClientID{});
     }
     if (code == ResponseCode::sign_up_failed)
     {
-      return std::make_unique<ResponseFailureSignUp>(server_version);
+      return ResponseFailureSignUp(server_version);
     }
     if (code == ResponseCode::public_key_received)
     {
-      return std::make_unique<ResponseSuccessPublicKey>(server_version, ClientID{}, AESKey{});
+      return ResponseSuccessPublicKey(server_version, ClientID{}, AESKey{});
     }
     if (code == ResponseCode::crc_valid)
     {
-      return std::make_unique<ResponseSuccessCRCValid>(server_version, ClientID{}, 0, Filename{}, 0);
+      return ResponseSuccessCRCValid(server_version, ClientID{}, 0, Filename{}, 0);
     }
     if (code == ResponseCode::message_received)
     {
-      return std::make_unique<ResponseSuccessMessageReceived>(server_version, ClientID{});
+      return ResponseSuccessMessageReceived(server_version, ClientID{});
     }
     if (code == ResponseCode::sign_in_allowed)
     {
-      return std::make_unique<ResponseSuccessSignInAllowed>(server_version, ClientID{}, AESKey{});
+      return ResponseSuccessSignInAllowed(server_version, ClientID{}, AESKey{});
     }
     if (code == ResponseCode::sign_in_rejected)
     {
-      return std::make_unique<ResponseFailureSignInRejected>(server_version, ClientID{});
+      return ResponseFailureSignInRejected(server_version, ClientID{});
     }
     if (code == ResponseCode::general_error)
     {
-      return std::make_unique<ResponseErrorGeneral>(server_version);
+      return ResponseErrorGeneral(server_version);
     }
 
-    return {};
+    return std::nullopt;
   }
 #pragma pack(pop)
 } // anonymous namespace
