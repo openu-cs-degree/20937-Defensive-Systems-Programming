@@ -141,9 +141,9 @@ namespace
     NameBase &operator=(NameBase &&) = default;
     ~NameBase() = default;
 
-    const std::string get_name() const
+    const std::string_view get_name() const
     {
-      return std::string(name.data(), name.size());
+      return std::string_view(name.data());
     }
 
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
@@ -233,17 +233,17 @@ namespace
 
   struct ClientID
   {
-    uint64_t lower;
     uint64_t upper;
+    uint64_t lower;
     static std::optional<ClientID> from_string(const std::string_view &str)
     {
       ClientID client_id;
-      auto res = std::from_chars(str.data(), str.data() + str.size(), client_id.lower, 16);
+      auto res = std::from_chars(str.data(), str.data() + str.size(), client_id.upper, 16);
       if (res.ec != std::errc())
       {
         return std::nullopt;
       }
-      res = std::from_chars(str.data() + 16, str.data() + 16 + str.size(), client_id.upper, 16);
+      res = std::from_chars(str.data() + 16, str.data() + 16 + str.size(), client_id.lower, 16);
       if (res.ec != std::errc())
       {
         return std::nullopt;
@@ -252,7 +252,12 @@ namespace
     }
     friend std::ostream &operator<<(std::ostream &os, const ClientID &client_id)
     {
-      os << client_id.upper << client_id.lower;
+      os << "0x" << std::hex;
+      if (client_id.upper > 0)
+      {
+        os << client_id.upper << std::setfill('0') << std::setw(16);
+      }
+      os << client_id.lower << std::dec;
       return os;
     }
   };
@@ -342,10 +347,10 @@ namespace
 
     friend std::ostream &operator<<(std::ostream &os, const Request &request)
     {
-      os << '\t' << request.client_id << '\n'
+      os << '\t' << "client_id: " << request.client_id << '\n'
          << '\t' << "version: " << static_cast<uint16_t>(request.version) << '\n'
          << '\t' << "code: " << static_cast<uint16_t>(request.code) << '\n'
-         << '\t' << "payload_size: " << request.payload_size << '\n';
+         << '\t' << "payload_size: " << request.payload_size;
       return os;
     }
   };
@@ -567,7 +572,7 @@ namespace
 
     friend std::ostream &operator<<(std::ostream &os, const RequestSignUp &request)
     {
-      os << '\t' << "name: " << request.name << '\n';
+      os << '\t' << request.name << '\n';
       return os;
     }
   };
@@ -743,16 +748,26 @@ namespace
     return true;
   }
 
+  // TODO: more clever SFINAE please (or... idk... std::variant?)
   template <typename FullRequest>
-  typename std::enable_if<std::is_base_of<Request, FullRequest>::value && !std::is_same<Request, FullRequest>::value, std::ostream &>::type
-  operator<<(std::ostream &os, const FullRequest &request)
+  typename std::enable_if<std::is_base_of<Request, FullRequest>::value && !std::is_same<Request, FullRequest>::value, void>::type
+  log_request(const FullRequest &request)
   {
-    os << "Header:\n"
-       << static_cast<const Request &>(request)
-       << "Payload:\n"
-       << static_cast<const FullRequest &>(request);
+    log("Header:");
+    log(static_cast<const Request &>(request));
+    log("Payload:");
+    log(static_cast<const FullRequest &>(request));
+  }
 
-    return os;
+  // TODO: more clever SFINAE please (or... idk... std::variant?)
+  template <typename FullResponse>
+  typename std::enable_if<std::is_base_of<Response, FullResponse>::value && !std::is_same<Response, FullResponse>::value, void>::type
+  log_response(const FullResponse &response)
+  {
+    log("Header:");
+    log(static_cast<const Response &>(response));
+    log("Payload:");
+    log(static_cast<const FullResponse &>(response));
   }
 
   const std::optional<ResponseVariant> receive_response(boost::asio::ip::tcp::socket &socket)
@@ -1017,7 +1032,7 @@ namespace
         return false;
       }
 
-      file << client_name << '\n'
+      file << client_name.get_name() << '\n'
            << client_id << '\n'
            << private_key;
 
@@ -1206,6 +1221,24 @@ namespace maman15
       return;
     }
     log(instructions_file_content->ip, ":", instructions_file_content->port, "\n", instructions_file_content->client_name, instructions_file_content->file_path.string());
+
+    RequestSignUp request{instructions_file_content->client_name};
+    log("RequestSignUp:");
+    log_request(request);
+
+    ResponseSuccessSignUp response{1, ClientID{0, 69}};
+    log("ResponseSuccessSignUp:");
+    log_response(response);
+
+    IdentifierFileContent identifier_file_content{instructions_file_content->client_name, response.client_id};
+    if (!identifier_file_content.to_file(identifier_file_name))
+    {
+      log("Failed to write me.info file");
+    }
+    else
+    {
+      log("Wrote me.info file successfully");
+    }
   }
 
   bool Client::send_public_key()
