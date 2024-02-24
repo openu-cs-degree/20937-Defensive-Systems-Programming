@@ -22,6 +22,8 @@
 #include <rsa.h>
 #pragma endregion
 
+#define DEBUG 1
+
 #pragma region macros
 // +----------------------------------------------------------------------------------+
 // | Macros & Logging Supplements                                                     |
@@ -202,8 +204,7 @@ namespace
     {
       return name.size() >= min_name_len &&
              name.size() <= max_name_len &&
-             std::none_of(name.begin(), name.end() - 1, [](char c) { return c == '\0'; }) &&
-             *(name.end() - 1) == '\0';
+             std::none_of(name.begin(), name.end(), [](char c) { return c == '\0'; });
     }
   };
 
@@ -1124,7 +1125,7 @@ namespace maman15
       }
       if (auto response = receive_response(socket))
       {
-        log("Received reponse: ", response);
+        log("Received reponse");
         // TODO: handle response
         return true;
       }
@@ -1143,14 +1144,14 @@ namespace maman15
       }
       if (auto response = receive_response(socket))
       {
-        log("Received reponse: ", response);
+        log("Received reponse");
         // handle response
         bool result = std::visit(
             [&](auto &&arg) -> bool {
               using T = std::decay_t<decltype(arg)>;
               if constexpr (std::is_same_v<T, ResponseSuccessSignUp>)
               {
-                log("Received sign up response: ", arg);
+                log("Received sign up response");
                 IdentifierFileContent identifier_file_content{instructions_file_content->client_name, arg.client_id};
                 if (!identifier_file_content.to_file(identifier_file_name))
                 {
@@ -1161,17 +1162,17 @@ namespace maman15
               }
               else if constexpr (std::is_same_v<T, ResponseFailureSignUp>)
               {
-                log("Received sign up failed response: ", arg);
+                log("Received sign up failed response");
                 return false;
               }
               else if constexpr (std::is_same_v<T, ResponseErrorGeneral>)
               {
-                log("Received general error: ", arg);
+                log("Received general error");
                 return false;
               }
               else
               {
-                log("Received unexpected response: ", arg);
+                log("Received unexpected response");
                 return false;
               }
             },
@@ -1187,6 +1188,24 @@ namespace maman15
     }
 
     // TODO: move sign_in and sign_up to separate functions?
+  }
+
+  void Client::temp()
+  {
+    log("temp");
+    if (!std::filesystem::exists(instructions_file_name))
+    {
+      log("Instructions file (", instructions_file_name, ") does not exist.");
+      return;
+    }
+    log("Instructions file exists");
+    auto instructions_file_content = InstructionsFileContent::from_file(instructions_file_name);
+    if (!instructions_file_content)
+    {
+      log("Failed to read instructions file");
+      return;
+    }
+    log(instructions_file_content->ip, ":", instructions_file_content->port, "\n", instructions_file_content->client_name, instructions_file_content->file_path.string());
   }
 
   bool Client::send_public_key()

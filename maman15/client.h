@@ -91,6 +91,7 @@ namespace maman15
     bool send_public_key();
     bool send_file(const std::filesystem::path &file_path);
     bool validate_crc();
+    void temp();
 
   private:
     boost::asio::io_context io_context;
