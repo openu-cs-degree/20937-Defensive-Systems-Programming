@@ -403,6 +403,7 @@ namespace
 
   class ResponseSuccessSignUp final : public Response
   {
+  public: // TODO: either make private or make it a struct
     const ClientID client_id;
     static constexpr uint32_t payload_size = sizeof(client_id);
 
@@ -822,6 +823,34 @@ namespace
   {
     // ...
   }
+
+  struct PrivateKey
+  {
+    const CryptoPP::RSA::PrivateKey key;
+
+  public:
+    PrivateKey() = delete;
+    PrivateKey(const PrivateKey &) = delete;
+    PrivateKey &operator=(const PrivateKey &) = delete;
+    PrivateKey(PrivateKey &&) = default;
+    PrivateKey &operator=(PrivateKey &&) = default;
+
+    PrivateKey(const CryptoPP::RSA::PrivateKey &&key)
+        : key(key){};
+
+    static std::optional<PrivateKey> from_string(const std::string &str)
+    {
+      CryptoPP::RSA::PrivateKey private_key;
+      std::string decoded_key;
+      CryptoPP::StringSource ss(str, true, new CryptoPP::Base64Decoder(new CryptoPP::StringSink(decoded_key)));
+      private_key.Load(CryptoPP::StringSource(decoded_key, true).Ref());
+      if (!private_key.Validate(rng, 3))
+      {
+        return std::nullopt;
+      }
+      return std::make_optional<PrivateKey>(std::move(private_key));
+    }
+  };
 } // namespace
 #pragma endregion
 
@@ -839,7 +868,7 @@ namespace
     std::filesystem::path file_path;
 
   private:
-    InstructionsFileContent() = default;
+    InstructionsFileContent() = default; // TODO: delete, use std::move instead, then const all member variables
 
   public:
     static std::optional<InstructionsFileContent> from_file(const std::filesystem::path &info_file_path)
@@ -897,14 +926,20 @@ namespace
 
   struct IdentifierFileContent
   {
-    ClientName client_name;
-    ClientID client_id;
-    CryptoPP::RSA::PrivateKey private_key;
-
-  private:
-    IdentifierFileContent() = default;
+    const ClientName client_name;
+    const ClientID client_id;
+    const PrivateKey private_key;
 
   public:
+    IdentifierFileContent() = delete;
+    IdentifierFileContent(const IdentifierFileContent &) = delete;
+    IdentifierFileContent &operator=(const IdentifierFileContent &) = delete;
+    IdentifierFileContent(IdentifierFileContent &&) = delete;
+    IdentifierFileContent &operator=(IdentifierFileContent &&) = delete;
+
+    IdentifierFileContent(ClientName &&client_name, ClientID &&client_id, PrivateKey &&private_key)
+        : client_name(std::move(client_name)), client_id(std::move(client_id)), private_key(std::move(private_key)){};
+
     static std::optional<IdentifierFileContent> from_file(const std::filesystem::path &info_file_path)
     {
       std::ifstream file(info_file_path);
@@ -913,7 +948,6 @@ namespace
         return std::nullopt;
       }
 
-      IdentifierFileContent content;
       std::string line;
 
       // Read client name
@@ -926,14 +960,13 @@ namespace
       {
         return std::nullopt;
       }
-      content.client_name = std::move(client_name.value());
 
       // Read client uid
       if (!std::getline(file, line))
       {
         return std::nullopt;
       }
-      if (line.size() != 32) // TODO: constexpr. 16 bytes = 128 bits = 32 hex characters
+      if (line.size() != 32) // TODO: constexpr. 16 bytes = 128 bits = 32 hex characters. also, move to ClientID::from_string
       {
         return std::nullopt;
       }
@@ -942,17 +975,14 @@ namespace
       {
         return std::nullopt;
       }
-      content.client_id = id.value();
 
       // Read client's private key
       if (!std::getline(file, line))
       {
         return std::nullopt;
       }
-      std::string decoded_key;
-      CryptoPP::StringSource ss(line, true, new CryptoPP::Base64Decoder(new CryptoPP::StringSink(decoded_key)));
-      content.private_key.Load(CryptoPP::StringSource(decoded_key, true).Ref());
-      if (!content.private_key.Validate(rng, 3))
+      auto private_key = PrivateKey::from_string(line);
+      if (!private_key)
       {
         return std::nullopt;
       }
@@ -963,7 +993,52 @@ namespace
         return std::nullopt;
       }
 
-      return content;
+      return std::make_optional<IdentifierFileContent>(std::move(client_name.value()), std::move(id.value()), std::move(private_key.value()));
+    }
+  };
+
+  struct PrivateKeyFileContent
+  {
+    const PrivateKey private_key;
+
+  public:
+    PrivateKeyFileContent() = delete;
+    PrivateKeyFileContent(const PrivateKeyFileContent &) = delete;
+    PrivateKeyFileContent &operator=(const PrivateKeyFileContent &) = delete;
+    PrivateKeyFileContent(IdentifierFileContent &&) = delete;
+    PrivateKeyFileContent &operator=(IdentifierFileContent &&) = delete;
+
+    PrivateKeyFileContent(PrivateKey &&private_key)
+        : private_key(std::move(private_key)){};
+
+    static std::optional<PrivateKeyFileContent> from_file(const std::filesystem::path &info_file_path)
+    {
+      std::ifstream file(info_file_path);
+      if (!file.is_open())
+      {
+        return std::nullopt;
+      }
+
+      std::string line;
+
+      // Read client's private key
+      if (!std::getline(file, line))
+      {
+        return std::nullopt;
+      }
+      auto private_key = PrivateKey::from_string(line);
+      if (!private_key)
+      {
+        return std::nullopt;
+      }
+
+      // Make sure there are no more lines
+      if (std::getline(file, line))
+      {
+        return std::nullopt;
+      }
+
+      return std::make_optional<PrivateKeyFileContent>(std::move(private_key.value()));
     }
   };
 } // namespace
@@ -1048,19 +1123,19 @@ namespace maman15
               using T = std::decay_t<decltype(arg)>;
               if constexpr (std::is_same_v<T, ResponseSuccessSignUp>)
               {
-                log("Received sign up response");
+                log("Received sign up response: ", arg);
               }
               else if constexpr (std::is_same_v<T, ResponseFailureSignUp>)
               {
-                log("Received sign up failed response");
+                log("Received sign up failed response: ", arg);
               }
               else if constexpr (std::is_same_v<T, ResponseErrorGeneral>)
               {
-                log("Received general error");
+                log("Received general error: ", arg);
               }
               else
               {
-                log("Received unexpected response");
+                log("Received unexpected response: ", arg);
               }
             },
             response.value());
