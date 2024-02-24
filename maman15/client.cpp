@@ -133,8 +133,8 @@ namespace
   private:
   public:
     NameBase() = default; // TODO: make private
-    NameBase(const NameBase &) = delete;
-    NameBase &operator=(const NameBase &) = delete;
+    NameBase(const NameBase &) = default;
+    NameBase &operator=(const NameBase &) = default;
     NameBase(NameBase &&) = default;
     NameBase &operator=(NameBase &&) = default;
     ~NameBase() = default;
@@ -850,13 +850,22 @@ namespace
       }
       return std::make_optional<PrivateKey>(std::move(private_key));
     }
+
+    friend std::ostream &operator<<(std::ostream &os, const PrivateKey &private_key)
+    {
+      std::string encoded_key;
+      private_key.key.Save(CryptoPP::Base64Encoder(new CryptoPP::StringSink(encoded_key)).Ref());
+
+      os << encoded_key;
+      return os;
+    }
   };
 } // namespace
 #pragma endregion
 
-#pragma region client_utils
+#pragma region file_management
 // +----------------------------------------------------------------------------------+
-// | ClientUtils: utilities for the client                                            |
+// | FileManagement: utilities for the client files' reading and writing              |
 // +----------------------------------------------------------------------------------+
 namespace
 {
@@ -937,6 +946,9 @@ namespace
     IdentifierFileContent(IdentifierFileContent &&) = delete;
     IdentifierFileContent &operator=(IdentifierFileContent &&) = delete;
 
+    IdentifierFileContent(ClientName client_name, ClientID client_id)
+        // TODO: this c'tor is temporary, and it here due to the unclear step #2 of the sign-up instruction.
+        : client_name(client_name), client_id(client_id), private_key(PrivateKey{CryptoPP::RSA::PrivateKey{}}){};
     IdentifierFileContent(ClientName &&client_name, ClientID &&client_id, PrivateKey &&private_key)
         : client_name(std::move(client_name)), client_id(std::move(client_id)), private_key(std::move(private_key)){};
 
@@ -994,6 +1006,21 @@ namespace
       }
 
       return std::make_optional<IdentifierFileContent>(std::move(client_name.value()), std::move(id.value()), std::move(private_key.value()));
+    }
+
+    const bool to_file(const std::filesystem::path &info_file_path) const
+    {
+      std::ofstream file(info_file_path);
+      if (!file.is_open())
+      {
+        return false;
+      }
+
+      file << client_name << '\n'
+           << client_id << '\n'
+           << private_key;
+
+      return true;
     }
   };
 
@@ -1118,29 +1145,39 @@ namespace maman15
       {
         log("Received reponse: ", response);
         // handle response
-        std::visit(
-            [](auto &&arg) {
+        bool result = std::visit(
+            [&](auto &&arg) -> bool {
               using T = std::decay_t<decltype(arg)>;
               if constexpr (std::is_same_v<T, ResponseSuccessSignUp>)
               {
                 log("Received sign up response: ", arg);
+                IdentifierFileContent identifier_file_content{instructions_file_content->client_name, arg.client_id};
+                if (!identifier_file_content.to_file(identifier_file_name))
+                {
+                  log("Failed to write me file");
+                  return false;
+                }
+                return true;
               }
               else if constexpr (std::is_same_v<T, ResponseFailureSignUp>)
               {
                 log("Received sign up failed response: ", arg);
+                return false;
               }
               else if constexpr (std::is_same_v<T, ResponseErrorGeneral>)
               {
                 log("Received general error: ", arg);
+                return false;
               }
               else
               {
                 log("Received unexpected response: ", arg);
+                return false;
               }
             },
             response.value());
 
-        return true;
+        return result;
       }
       else
       {
