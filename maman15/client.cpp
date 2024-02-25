@@ -883,28 +883,34 @@ namespace
 // +----------------------------------------------------------------------------------+
 // | FileManagement: utilities for the client files' reading and writing              |
 // +----------------------------------------------------------------------------------+
-namespace
+namespace maman15
 {
-  struct InstructionsFileContent
+  struct Client::InstructionsFileContent
   {
-    boost::asio::ip::address ip;
-    uint16_t port;
-    ClientName client_name;
-    std::filesystem::path file_path;
-
-  private:
-    InstructionsFileContent() = default; // TODO: delete, use std::move instead, then const all member variables
+    const boost::asio::ip::address ip;
+    const uint16_t port;
+    const ClientName client_name;
+    const std::filesystem::path file_path;
 
   public:
-    static std::optional<InstructionsFileContent> from_file(const std::filesystem::path &info_file_path)
+    InstructionsFileContent() = delete;
+    InstructionsFileContent(const InstructionsFileContent &) = delete;
+    InstructionsFileContent &operator=(const InstructionsFileContent &) = delete;
+    InstructionsFileContent(InstructionsFileContent &&) = delete;
+    InstructionsFileContent &operator=(InstructionsFileContent &&) = delete;
+
+    InstructionsFileContent(boost::asio::ip::address ip, uint16_t port, ClientName &&client_name, std::filesystem::path file_path)
+        : ip(ip), port(port), client_name(std::move(client_name)), file_path(file_path){};
+
+    static std::optional<InstructionsFileContent> load() // TODO: return unique_ptr instead?
     {
-      std::ifstream file(info_file_path);
+      std::filesystem::path instructions_file_path{instructions_file_name};
+      std::ifstream file(instructions_file_path);
       if (!file.is_open())
       {
         return std::nullopt;
       }
 
-      InstructionsFileContent content;
       std::string line;
 
       // Read IP and port
@@ -914,11 +920,12 @@ namespace
       }
       std::stringstream ss(line);
       std::string ipStr;
-      if (!std::getline(ss, ipStr, ':') || !(ss >> content.port))
+      uint16_t port;
+      if (!std::getline(ss, ipStr, ':') || !(ss >> port))
       {
         return std::nullopt;
       }
-      content.ip = boost::asio::ip::address::from_string(ipStr);
+      auto ip = boost::asio::ip::address::from_string(ipStr);
 
       // Read client name
       if (!std::getline(file, line))
@@ -930,14 +937,13 @@ namespace
       {
         return std::nullopt;
       }
-      content.client_name = std::move(client_name.value());
 
       // Read file path
       if (!std::getline(file, line))
       {
         return std::nullopt;
       }
-      content.file_path = line;
+      std::filesystem::path file_path{line};
 
       // Make sure there are no more lines
       if (std::getline(file, line))
@@ -945,11 +951,20 @@ namespace
         return std::nullopt;
       }
 
-      return content;
+      return std::make_optional<InstructionsFileContent>(ip, port, std::move(client_name.value()), file_path);
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, const InstructionsFileContent &instructions)
+    {
+      os << "ip: " << instructions.ip << '\n'
+         << "port: " << instructions.port << '\n'
+         << "client_name: " << instructions.client_name.get_name() << '\n'
+         << "file_path: " << instructions.file_path << '\n';
+      return os;
     }
   };
 
-  struct IdentifierFileContent
+  struct Client::IdentifierFileContent
   {
     const ClientName client_name;
     const ClientID client_id;
@@ -968,9 +983,10 @@ namespace
     IdentifierFileContent(ClientName &&client_name, ClientID &&client_id, PrivateKey &&private_key)
         : client_name(std::move(client_name)), client_id(std::move(client_id)), private_key(std::move(private_key)){};
 
-    static std::optional<IdentifierFileContent> from_file(const std::filesystem::path &info_file_path)
+    static std::optional<IdentifierFileContent> load()
     {
-      std::ifstream file(info_file_path);
+      std::filesystem::path identifier_file_path{identifier_file_name};
+      std::ifstream file(identifier_file_path);
       if (!file.is_open())
       {
         return std::nullopt;
@@ -1024,9 +1040,10 @@ namespace
       return std::make_optional<IdentifierFileContent>(std::move(client_name.value()), std::move(id.value()), std::move(private_key.value()));
     }
 
-    const bool to_file(const std::filesystem::path &info_file_path) const
+    const bool save() const
     {
-      std::ofstream file(info_file_path);
+      std::filesystem::path identifier_file_path{identifier_file_name};
+      std::ofstream file(identifier_file_path);
       if (!file.is_open())
       {
         return false;
@@ -1040,7 +1057,7 @@ namespace
     }
   };
 
-  struct PrivateKeyFileContent
+  struct Client::PrivateKeyFileContent
   {
     const PrivateKey private_key;
 
@@ -1048,15 +1065,16 @@ namespace
     PrivateKeyFileContent() = delete;
     PrivateKeyFileContent(const PrivateKeyFileContent &) = delete;
     PrivateKeyFileContent &operator=(const PrivateKeyFileContent &) = delete;
-    PrivateKeyFileContent(IdentifierFileContent &&) = delete;
-    PrivateKeyFileContent &operator=(IdentifierFileContent &&) = delete;
+    PrivateKeyFileContent(PrivateKeyFileContent &&) = delete;
+    PrivateKeyFileContent &operator=(PrivateKeyFileContent &&) = delete;
 
     PrivateKeyFileContent(PrivateKey &&private_key)
         : private_key(std::move(private_key)){};
 
-    static std::optional<PrivateKeyFileContent> from_file(const std::filesystem::path &info_file_path)
+    static std::optional<PrivateKeyFileContent> load()
     {
-      std::ifstream file(info_file_path);
+      std::filesystem::path private_key_file_path{private_key_file_name};
+      std::ifstream file(private_key_file_path);
       if (!file.is_open())
       {
         return std::nullopt;
@@ -1084,25 +1102,26 @@ namespace
       return std::make_optional<PrivateKeyFileContent>(std::move(private_key.value()));
     }
   };
-} // namespace
+} // namespace maman15
 #pragma endregion
 
-#pragma region client_implementation
+#pragma region client_helper_functions
 // +----------------------------------------------------------------------------------+
 // | Client: implementation of Client class helper functions                          |
 // +----------------------------------------------------------------------------------+
-namespace
+namespace maman15
 {
-  bool inline sign_in(const std::string_view &identifier_file_name, boost::asio::ip::tcp::socket &socket)
+  bool Client::sign_in()
   {
-    auto identifier_file_content = IdentifierFileContent::from_file(identifier_file_name);
-    if (!identifier_file_content)
+    auto identifier_file = IdentifierFileContent::load();
+    if (!identifier_file)
     {
       log("Failed to read me file");
       return false;
     }
+    // identifier_file_content = std::make_unique<IdentifierFileContent>(std::move(identifier_file.value()));
 
-    if (!send_request(RequestSignIn{identifier_file_content->client_id, identifier_file_content->client_name}, socket))
+    if (!send_request(RequestSignIn{identifier_file->client_id, identifier_file->client_name}, socket))
     {
       log("Failed to send client id");
       return false;
@@ -1121,9 +1140,9 @@ namespace
     }
   }
 
-  bool inline sign_up(const InstructionsFileContent &instructions_file_content, const std::string_view &identifier_file_name, boost::asio::ip::tcp::socket &socket)
+  bool Client::sign_up()
   {
-    if (!send_request(RequestSignUp{instructions_file_content.client_name}, socket))
+    if (!send_request(RequestSignUp{instructions_file_content->client_name}, socket))
     {
       log("Failed to send client name");
       return false;
@@ -1143,13 +1162,16 @@ namespace
             if constexpr (std::is_same_v<T, ResponseSuccessSignUp>)
             {
               log("Received sign up response");
-              IdentifierFileContent identifier_file_content{instructions_file_content.client_name, arg.client_id};
-              if (!identifier_file_content.to_file(identifier_file_name))
+              identifier_file_content = std::make_unique<IdentifierFileContent>(instructions_file_content->client_name, arg.client_id);
+              if (identifier_file_content->save())
+              {
+                return true;
+              }
+              else
               {
                 log("Failed to write me file");
                 return false;
               }
-              return true;
             }
             else if constexpr (std::is_same_v<T, ResponseFailureSignUp>)
             {
@@ -1172,7 +1194,7 @@ namespace
       return result;
     }
   }
-} // namespace
+} // namespace maman15
 #pragma endregion
 
 #pragma region client
@@ -1187,74 +1209,99 @@ namespace maman15
     log("Client created");
   }
 
+  std::optional<Client> Client::create()
+  {
+    // Read instructions file
+    if (!std::filesystem::exists(instructions_file_name)) // TODO: into InstructionsFileContent::load
+    {
+      log("Instructions file (", instructions_file_name, ") does not exist.");
+      return std::nullopt;
+    }
+
+    Client client{};
+    auto instructions_file = InstructionsFileContent::load();
+    if (!instructions_file)
+    {
+      log("Failed to read transfer file");
+      return std::nullopt;
+    }
+    log(*instructions_file);
+    // client.instructions_file_content = std::make_unique<InstructionsFileContent>(std::move(instructions_file.value()));
+
+    // Connect to server
+    try
+    {
+      boost::asio::ip::tcp::resolver resolver(client.io_context);
+      boost::asio::ip::tcp::endpoint endpoint(instructions_file->ip, instructions_file->port);
+      boost::asio::ip::tcp::resolver::results_type endpoints = resolver.resolve(endpoint);
+      boost::asio::connect(client.socket, endpoints);
+    }
+    catch (const std::exception &e)
+    {
+      log("Failed to connect to server: ", e.what());
+      return std::nullopt;
+    }
+
+    return std::nullopt; // TODO: WIP. idk. return unique_ptr instead?
+  }
+
   bool Client::register_to_server()
   {
     log("Registering to server");
 
-    // Read instructions file
-    if (!std::filesystem::exists(instructions_file_name)) // TODO: into InstructionsFileContent::from_file
-    {
-      log("Instructions file (", instructions_file_name, ") does not exist.");
-      return false;
-    }
-    auto instructions_file_content = InstructionsFileContent::from_file(instructions_file_name);
     if (!instructions_file_content)
     {
-      log("Failed to read transfer file");
+      log("Instructions file content is not set");
       return false;
     }
 
     // Connect to server
     // TODO: move connection to... c'tor? factory? I don't like factory in this case...
-    boost::asio::ip::tcp::resolver resolver(io_context);
-    boost::asio::ip::tcp::endpoint endpoint(instructions_file_content->ip, instructions_file_content->port);
-    boost::asio::ip::tcp::resolver::results_type endpoints = resolver.resolve(endpoint);
-    boost::asio::connect(socket, endpoints);
 
     if (std::filesystem::exists(identifier_file_name))
     {
-      return sign_in(identifier_file_name, socket);
+      return sign_in();
     }
     else
     {
-      return sign_up(instructions_file_content.value(), identifier_file_name, socket);
+      return sign_up();
     }
   }
 
   void Client::temp()
   {
-    log("temp");
-    if (!std::filesystem::exists(instructions_file_name))
-    {
-      log("Instructions file (", instructions_file_name, ") does not exist.");
-      return;
-    }
-    log("Instructions file exists");
-    auto instructions_file_content = InstructionsFileContent::from_file(instructions_file_name);
-    if (!instructions_file_content)
-    {
-      log("Failed to read instructions file");
-      return;
-    }
-    log(instructions_file_content->ip, ":", instructions_file_content->port, "\n", instructions_file_content->client_name, instructions_file_content->file_path.string());
+    // log("temp");
+    // if (!std::filesystem::exists(instructions_file_name))
+    // {
+    //   log("Instructions file (", instructions_file_name, ") does not exist.");
+    //   return;
+    // }
+    // log("Instructions file exists");
+    // auto instructions_file_content = InstructionsFileContent::load();
+    // if (!instructions_file_content)
+    // {
+    //   log("Failed to read instructions file");
+    //   return;
+    // }
+    // log(instructions_file_content->ip, ":", instructions_file_content->port, "\n", instructions_file_content->client_name, instructions_file_content->file_path.string());
 
-    RequestSignUp request{instructions_file_content->client_name};
-    log("RequestSignUp:");
-    log_request(request);
+    // RequestSignUp request{instructions_file_content->client_name};
+    // log("RequestSignUp:");
+    // log_request(request);
 
-    ResponseSuccessSignUp response{1, ClientID{0, 69}};
-    log("ResponseSuccessSignUp:");
-    log_response(response);
+    // ResponseSuccessSignUp response{1, ClientID{0, 69}};
+    // log("ResponseSuccessSignUp:");
+    // log_response(response);
 
-    IdentifierFileContent identifier_file_content{instructions_file_content->client_name, response.client_id};
-    if (!identifier_file_content.to_file(identifier_file_name))
-    {
-      log("Failed to write me.info file");
-    }
-    else
-    {
-      log("Wrote me.info file successfully");
-    }
+    // IdentifierFileContent identifier_file_content{instructions_file_content->client_name, response.client_id};
+    // if (!identifier_file_content.save())
+    // {
+    //   log("Failed to write me.info file");
+    // }
+    // else
+    // {
+    //   log("Wrote me.info file successfully");
+    // }
   }
 
   bool Client::send_public_key()
@@ -1290,6 +1337,8 @@ namespace maman15
     }
     return true;
   }
+
+  Client::~Client() = default;
 } // namespace maman15
 #pragma endregion
 

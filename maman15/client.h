@@ -56,6 +56,7 @@
 #pragma once
 
 #include <filesystem>
+#include <optional>
 #include <string_view>
 
 #pragma warning(push)
@@ -72,20 +73,26 @@ namespace maman15
     static constexpr inline uint32_t version = 3;
 
   private:
-    static constexpr inline std::string_view instructions_file_name = "transfer.info";
+    struct InstructionsFileContent;
+    struct PrivateKeyFileContent;
+    struct IdentifierFileContent;
+
+    static constexpr inline std::string_view instructions_file_name = "transfer.info"; // TODO: make std::filesystem::path?
     static constexpr inline std::string_view private_key_file_name = "priv.key";
     static constexpr inline std::string_view identifier_file_name = "me.info";
 
     using tcp = boost::asio::ip::tcp;
 
-  public:
     Client();
+
+  public:
+    static std::optional<Client> create();
 
     Client(const Client &) = delete;
     Client &operator=(const Client &) = delete;
-    Client(Client &&) = delete;
-    Client &operator=(Client &&) = delete;
-    ~Client() = default;
+    Client(Client &&) = default;
+    Client &operator=(Client &&) = default;
+    ~Client();
 
     bool register_to_server();
     bool send_public_key();
@@ -97,6 +104,12 @@ namespace maman15
     boost::asio::io_context io_context;
     boost::asio::ip::tcp::socket socket;
 
+    std::unique_ptr<InstructionsFileContent> instructions_file_content;
+    std::unique_ptr<PrivateKeyFileContent> private_key_file_content;
+    std::unique_ptr<IdentifierFileContent> identifier_file_content;
+
     bool clear_socket();
+    bool sign_up();
+    bool sign_in();
   };
 } // namespace maman15
