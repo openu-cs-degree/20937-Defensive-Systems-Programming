@@ -83,10 +83,11 @@ namespace maman15
 
     using tcp = boost::asio::ip::tcp;
 
+  public: // TODO: make private
     Client();
 
   public:
-    static std::optional<Client> create();
+    static std::unique_ptr<Client> create();
 
     Client(const Client &) = delete;
     Client &operator=(const Client &) = delete;

@@ -133,8 +133,9 @@ namespace
     // TODO: name_len and max_name_len?
 
   private:
+    NameBase() = default;
+
   public:
-    NameBase() = default; // TODO: make private
     NameBase(const NameBase &) = default;
     NameBase &operator=(const NameBase &) = default;
     NameBase(NameBase &&) = default;
@@ -153,8 +154,7 @@ namespace
       return true;
     }
 
-    // TODO: return std::optional<NameBase> or std::optional<NameBase<Trait>>?
-    static const std::optional<NameBase> read_from_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
+    static const std::optional<NameBase<Trait>> read_from_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error)
     {
       NameBase name{};
 
@@ -189,8 +189,6 @@ namespace
       os << Trait::type_name << ": " << name.get_name() << '\n';
       return os;
     }
-
-    // TODO: make private is_valid(const std::string &str), check that len <= 255
   };
 
   struct ClientNameTrait
@@ -235,21 +233,33 @@ namespace
   {
     uint64_t upper;
     uint64_t lower;
-    static std::optional<ClientID> from_string(const std::string_view &str)
+
+    static std::optional<ClientID> from_string(const std::string &str)
     {
+      static constexpr auto max_len = 32; // 128 bits = 16 bytes = 32 hex characters
+      if (str.size() > max_len)
+      {
+        return std::nullopt;
+      }
+      std::array<char, max_len> arr{};
+      std::fill(arr.begin(), arr.end(), '0');
+      std::copy(str.begin(), str.end(), arr.end() - str.size());
+
       ClientID client_id;
-      auto res = std::from_chars(str.data(), str.data() + str.size(), client_id.upper, 16);
+      static constexpr auto half_arr = 16;
+      auto res = std::from_chars(arr.data(), arr.data() + arr.size(), client_id.upper, half_arr);
       if (res.ec != std::errc())
       {
         return std::nullopt;
       }
-      res = std::from_chars(str.data() + 16, str.data() + 16 + str.size(), client_id.lower, 16);
+      res = std::from_chars(arr.data() + half_arr, arr.data() + half_arr + arr.size(), client_id.lower, half_arr);
       if (res.ec != std::errc())
       {
         return std::nullopt;
       }
       return client_id;
     }
+
     friend std::ostream &operator<<(std::ostream &os, const ClientID &client_id)
     {
       os << "0x" << std::hex;
@@ -727,47 +737,53 @@ namespace
     }
   };
 
+  using RequestVariant = std::variant<
+      RequestSignUp,
+      RequestSendPublicKey,
+      RequestSignIn,
+      RequestSendFile,
+      RequestCRCValid,
+      RequestCRCInvalid,
+      RequestCRCInvalid4thTime>;
+
   // Requests & Responses IO
 
-  template <typename FullRequest>
-  typename std::enable_if<std::is_base_of<Request, FullRequest>::value && !std::is_same<Request, FullRequest>::value, bool>::type
-  send_request(const FullRequest &request, boost::asio::ip::tcp::socket &socket)
+  bool send_request(const RequestVariant &request, boost::asio::ip::tcp::socket &socket)
   {
     boost::system::error_code error;
 
-    if (!request.Request::write_to_socket(socket, error))
-    {
-      return false;
-    }
+    bool success = std::visit([&](auto &&req) {
+      if (!req.Request::write_to_socket(socket, error))
+      {
+        return false;
+      }
+      return req.write_to_socket(socket, error);
+    },
+                              request);
 
-    if (!request.write_to_socket(socket, error))
-    {
-      return false;
-    }
-
-    return true;
+    return success && !error;
   }
 
-  // TODO: more clever SFINAE please (or... idk... std::variant?)
-  template <typename FullRequest>
-  typename std::enable_if<std::is_base_of<Request, FullRequest>::value && !std::is_same<Request, FullRequest>::value, void>::type
-  log_request(const FullRequest &request)
+  void log_request(const RequestVariant &request)
   {
-    log("Header:");
-    log(static_cast<const Request &>(request));
-    log("Payload:");
-    log(static_cast<const FullRequest &>(request));
+    std::visit([&](auto &&req) {
+      log("Header:");
+      log(static_cast<const Request &>(req));
+      log("Payload:");
+      log(req);
+    },
+               request);
   }
 
-  // TODO: more clever SFINAE please (or... idk... std::variant?)
-  template <typename FullResponse>
-  typename std::enable_if<std::is_base_of<Response, FullResponse>::value && !std::is_same<Response, FullResponse>::value, void>::type
-  log_response(const FullResponse &response)
+  void log_response(const ResponseVariant &response)
   {
-    log("Header:");
-    log(static_cast<const Response &>(response));
-    log("Payload:");
-    log(static_cast<const FullResponse &>(response));
+    std::visit([&](auto &&res) {
+      log("Header:");
+      log(static_cast<const Response &>(res));
+      log("Payload:");
+      log(res);
+    },
+               response);
   }
 
   const std::optional<ResponseVariant> receive_response(boost::asio::ip::tcp::socket &socket)
@@ -796,7 +812,7 @@ namespace
     }
     if (code == ResponseCode::crc_valid)
     {
-      return ResponseSuccessCRCValid(server_version, ClientID{}, 0, Filename{}, 0);
+      return ResponseSuccessCRCValid(server_version, ClientID{}, 0, Filename::from_string("temp").value(), 0);
     }
     if (code == ResponseCode::message_received)
     {
@@ -905,6 +921,11 @@ namespace maman15
     static std::optional<InstructionsFileContent> load() // TODO: return unique_ptr instead?
     {
       std::filesystem::path instructions_file_path{instructions_file_name};
+      if (!std::filesystem::exists(instructions_file_path))
+      {
+        log("Instructions file (", instructions_file_name, ") does not exist.");
+        return std::nullopt;
+      }
       std::ifstream file(instructions_file_path);
       if (!file.is_open())
       {
@@ -1007,10 +1028,6 @@ namespace maman15
 
       // Read client uid
       if (!std::getline(file, line))
-      {
-        return std::nullopt;
-      }
-      if (line.size() != 32) // TODO: constexpr. 16 bytes = 128 bits = 32 hex characters. also, move to ClientID::from_string
       {
         return std::nullopt;
       }
@@ -1209,40 +1226,35 @@ namespace maman15
     log("Client created");
   }
 
-  std::optional<Client> Client::create()
+  std::unique_ptr<Client> Client::create()
   {
-    // Read instructions file
-    if (!std::filesystem::exists(instructions_file_name)) // TODO: into InstructionsFileContent::load
-    {
-      log("Instructions file (", instructions_file_name, ") does not exist.");
-      return std::nullopt;
-    }
-
-    Client client{};
     auto instructions_file = InstructionsFileContent::load();
     if (!instructions_file)
     {
       log("Failed to read transfer file");
-      return std::nullopt;
+      return {};
     }
     log(*instructions_file);
+    Client client{};
+
+    std::unique_ptr client_ptr = std::make_unique<Client>();
     // client.instructions_file_content = std::make_unique<InstructionsFileContent>(std::move(instructions_file.value()));
 
-    // Connect to server
-    try
-    {
-      boost::asio::ip::tcp::resolver resolver(client.io_context);
-      boost::asio::ip::tcp::endpoint endpoint(instructions_file->ip, instructions_file->port);
-      boost::asio::ip::tcp::resolver::results_type endpoints = resolver.resolve(endpoint);
-      boost::asio::connect(client.socket, endpoints);
-    }
-    catch (const std::exception &e)
-    {
-      log("Failed to connect to server: ", e.what());
-      return std::nullopt;
-    }
+    // Connect to server... move to client c'tor?
+    // try
+    // {
+    //   boost::asio::ip::tcp::resolver resolver(client.io_context);
+    //   boost::asio::ip::tcp::endpoint endpoint(instructions_file->ip, instructions_file->port);
+    //   boost::asio::ip::tcp::resolver::results_type endpoints = resolver.resolve(endpoint);
+    //   boost::asio::connect(client.socket, endpoints);
+    // }
+    // catch (const std::exception &e)
+    // {
+    //   log("Failed to connect to server: ", e.what());
+    //   return std::nullopt;
+    // }
 
-    return std::nullopt; // TODO: WIP. idk. return unique_ptr instead?
+    return {}; // TODO: WIP. idk. return unique_ptr instead?
   }
 
   bool Client::register_to_server()
@@ -1251,12 +1263,9 @@ namespace maman15
 
     if (!instructions_file_content)
     {
-      log("Instructions file content is not set");
+      log("Something's wrong. Try creating a new Client object.");
       return false;
     }
-
-    // Connect to server
-    // TODO: move connection to... c'tor? factory? I don't like factory in this case...
 
     if (std::filesystem::exists(identifier_file_name))
     {
@@ -1270,38 +1279,36 @@ namespace maman15
 
   void Client::temp()
   {
-    // log("temp");
-    // if (!std::filesystem::exists(instructions_file_name))
-    // {
-    //   log("Instructions file (", instructions_file_name, ") does not exist.");
-    //   return;
-    // }
-    // log("Instructions file exists");
-    // auto instructions_file_content = InstructionsFileContent::load();
-    // if (!instructions_file_content)
-    // {
-    //   log("Failed to read instructions file");
-    //   return;
-    // }
-    // log(instructions_file_content->ip, ":", instructions_file_content->port, "\n", instructions_file_content->client_name, instructions_file_content->file_path.string());
+    log("temp");
+    auto instructions_file = InstructionsFileContent::load();
+    if (!instructions_file)
+    {
+      log("Failed to read instructions file");
+      return;
+    }
+    log(instructions_file->ip, ":", instructions_file->port, "\n", instructions_file->client_name, instructions_file->file_path.string());
 
-    // RequestSignUp request{instructions_file_content->client_name};
-    // log("RequestSignUp:");
-    // log_request(request);
+    RequestVariant request{RequestSignUp{instructions_file->client_name}};
+    log("RequestSignUp:");
+    log_request(request);
 
-    // ResponseSuccessSignUp response{1, ClientID{0, 69}};
-    // log("ResponseSuccessSignUp:");
-    // log_response(response);
+    ResponseVariant response{ResponseSuccessSignUp{1, ClientID{0, 69}}};
+    log("ResponseSuccessSignUp:");
+    log_response(response);
 
-    // IdentifierFileContent identifier_file_content{instructions_file_content->client_name, response.client_id};
-    // if (!identifier_file_content.save())
-    // {
-    //   log("Failed to write me.info file");
-    // }
-    // else
-    // {
-    //   log("Wrote me.info file successfully");
-    // }
+    if (std::holds_alternative<ResponseSuccessSignUp>(response))
+    {
+      ResponseSuccessSignUp &success_response = std::get<ResponseSuccessSignUp>(response);
+      IdentifierFileContent identifier_file{instructions_file->client_name, success_response.client_id};
+      if (!identifier_file.save())
+      {
+        log("Failed to write me.info file");
+      }
+      else
+      {
+        log("Wrote me.info file successfully");
+      }
+    }
   }
 
   bool Client::send_public_key()
