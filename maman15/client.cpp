@@ -556,11 +556,11 @@ namespace
 
   class RequestSignUp final : public Request
   {
-    ClientName &name;
+    const ClientName &name;
     static constexpr uint32_t payload_size = sizeof(name);
 
   public:
-    explicit RequestSignUp(ClientName &name)
+    explicit RequestSignUp(const ClientName &name)
         : Request(ClientID{}, RequestCode::sign_up, payload_size), name(name){};
 
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
@@ -1087,6 +1087,94 @@ namespace
 } // namespace
 #pragma endregion
 
+#pragma region client_implementation
+// +----------------------------------------------------------------------------------+
+// | Client: implementation of Client class helper functions                          |
+// +----------------------------------------------------------------------------------+
+namespace
+{
+  bool inline sign_in(const std::string_view &identifier_file_name, boost::asio::ip::tcp::socket &socket)
+  {
+    auto identifier_file_content = IdentifierFileContent::from_file(identifier_file_name);
+    if (!identifier_file_content)
+    {
+      log("Failed to read me file");
+      return false;
+    }
+
+    if (!send_request(RequestSignIn{identifier_file_content->client_id, identifier_file_content->client_name}, socket))
+    {
+      log("Failed to send client id");
+      return false;
+    }
+
+    if (auto response = receive_response(socket))
+    {
+      log("Received reponse");
+      // TODO: handle response
+      return true;
+    }
+    else
+    {
+      log("Failed to receive client id");
+      return false;
+    }
+  }
+
+  bool inline sign_up(const InstructionsFileContent &instructions_file_content, const std::string_view &identifier_file_name, boost::asio::ip::tcp::socket &socket)
+  {
+    if (!send_request(RequestSignUp{instructions_file_content.client_name}, socket))
+    {
+      log("Failed to send client name");
+      return false;
+    }
+
+    if (auto response = receive_response(socket); !response)
+    {
+      log("Failed to receive client id");
+      return false;
+    }
+    else
+    {
+      log("Received reponse");
+      bool result = std::visit(
+          [&](auto &&arg) -> bool {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, ResponseSuccessSignUp>)
+            {
+              log("Received sign up response");
+              IdentifierFileContent identifier_file_content{instructions_file_content.client_name, arg.client_id};
+              if (!identifier_file_content.to_file(identifier_file_name))
+              {
+                log("Failed to write me file");
+                return false;
+              }
+              return true;
+            }
+            else if constexpr (std::is_same_v<T, ResponseFailureSignUp>)
+            {
+              log("Received sign up failed response");
+              return false;
+            }
+            else if constexpr (std::is_same_v<T, ResponseErrorGeneral>)
+            {
+              log("Received general error");
+              return false;
+            }
+            else
+            {
+              log("Received unexpected response");
+              return false;
+            }
+          },
+          response.value());
+
+      return result;
+    }
+  }
+} // namespace
+#pragma endregion
+
 #pragma region client
 // +----------------------------------------------------------------------------------+
 // | Client: implementation of Client class                                           |
@@ -1123,86 +1211,14 @@ namespace maman15
     boost::asio::ip::tcp::resolver::results_type endpoints = resolver.resolve(endpoint);
     boost::asio::connect(socket, endpoints);
 
-    // if identifier exists, sign in
     if (std::filesystem::exists(identifier_file_name))
     {
-      auto identifier_file_content = IdentifierFileContent::from_file(identifier_file_name);
-      if (!identifier_file_content)
-      {
-        log("Failed to read me file");
-        return false;
-      }
-
-      if (!send_request(RequestSignIn{identifier_file_content->client_id, identifier_file_content->client_name}, socket))
-      {
-        log("Failed to send client id");
-        return false;
-      }
-      if (auto response = receive_response(socket))
-      {
-        log("Received reponse");
-        // TODO: handle response
-        return true;
-      }
-      else
-      {
-        log("Failed to receive client id");
-        return false;
-      }
+      return sign_in(identifier_file_name, socket);
     }
-    else // sign up
+    else
     {
-      if (!send_request(RequestSignUp{instructions_file_content->client_name}, socket))
-      {
-        log("Failed to send client name");
-        return false;
-      }
-      if (auto response = receive_response(socket))
-      {
-        log("Received reponse");
-        // handle response
-        bool result = std::visit(
-            [&](auto &&arg) -> bool {
-              using T = std::decay_t<decltype(arg)>;
-              if constexpr (std::is_same_v<T, ResponseSuccessSignUp>)
-              {
-                log("Received sign up response");
-                IdentifierFileContent identifier_file_content{instructions_file_content->client_name, arg.client_id};
-                if (!identifier_file_content.to_file(identifier_file_name))
-                {
-                  log("Failed to write me file");
-                  return false;
-                }
-                return true;
-              }
-              else if constexpr (std::is_same_v<T, ResponseFailureSignUp>)
-              {
-                log("Received sign up failed response");
-                return false;
-              }
-              else if constexpr (std::is_same_v<T, ResponseErrorGeneral>)
-              {
-                log("Received general error");
-                return false;
-              }
-              else
-              {
-                log("Received unexpected response");
-                return false;
-              }
-            },
-            response.value());
-
-        return result;
-      }
-      else
-      {
-        log("Failed to receive client id");
-        return false;
-      }
+      return sign_up(instructions_file_content.value(), identifier_file_name, socket);
     }
-
-    // TODO: move sign_in and sign_up to separate functions?
   }
 
   void Client::temp()
