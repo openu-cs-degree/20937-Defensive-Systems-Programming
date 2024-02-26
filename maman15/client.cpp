@@ -417,13 +417,11 @@ namespace
 
   // Response concrete classes (final, non-abstract)
 
-  class ResponseSuccessSignUp final : public Response
+  struct ResponseSuccessSignUp final : public Response
   {
-  public: // TODO: either make private or make it a struct
     const ClientID client_id;
     static constexpr uint32_t payload_size = sizeof(client_id);
 
-  public:
     explicit ResponseSuccessSignUp(uint8_t server_version, ClientID client_id)
         : Response(server_version, ResponseCode::sign_up_succeeded, payload_size), client_id(client_id){};
 
@@ -434,11 +432,10 @@ namespace
     }
   };
 
-  class ResponseFailureSignUp final : public Response
+  struct ResponseFailureSignUp final : public Response
   {
     static constexpr uint32_t payload_size = 0;
 
-  public:
     explicit ResponseFailureSignUp(uint8_t server_version)
         : Response(server_version, ResponseCode::sign_up_failed, payload_size){};
 
@@ -448,13 +445,12 @@ namespace
     }
   };
 
-  class ResponseSuccessPublicKey final : public Response
+  struct ResponseSuccessPublicKey final : public Response
   {
     ClientID client_id;
     AESKey aes_key;
     static constexpr uint32_t payload_size = sizeof(client_id) + sizeof(aes_key);
 
-  public:
     explicit ResponseSuccessPublicKey(uint8_t server_version, ClientID client_id, AESKey aes_key)
         : Response(server_version, ResponseCode::public_key_received, payload_size), client_id(client_id), aes_key(std::move(aes_key)){};
 
@@ -466,7 +462,7 @@ namespace
     }
   };
 
-  class ResponseSuccessCRCValid final : public Response
+  struct ResponseSuccessCRCValid final : public Response
   {
     ClientID client_id;
     uint32_t content_size;
@@ -474,7 +470,6 @@ namespace
     uint32_t ckcsum;
     static constexpr uint32_t payload_size = sizeof(client_id) + sizeof(content_size) + sizeof(filename) + sizeof(ckcsum);
 
-  public:
     explicit ResponseSuccessCRCValid(uint8_t server_version, ClientID client_id, uint32_t content_size, Filename filename, uint32_t ckcsum)
         : Response(server_version, ResponseCode::crc_valid, payload_size), client_id(client_id), content_size(content_size), filename(std::move(filename)), ckcsum(ckcsum){};
 
@@ -488,12 +483,11 @@ namespace
     }
   };
 
-  class ResponseSuccessMessageReceived final : public Response
+  struct ResponseSuccessMessageReceived final : public Response
   {
     ClientID client_id;
     static constexpr uint32_t payload_size = sizeof(client_id);
 
-  public:
     explicit ResponseSuccessMessageReceived(uint8_t server_version, ClientID client_id)
         : Response(server_version, ResponseCode::message_received, payload_size), client_id(client_id){};
 
@@ -504,13 +498,12 @@ namespace
     }
   };
 
-  class ResponseSuccessSignInAllowed final : public Response
+  struct ResponseSuccessSignInAllowed final : public Response
   {
     ClientID client_id;
     AESKey aes_key;
     static constexpr uint32_t payload_size = sizeof(client_id) + sizeof(aes_key);
 
-  public:
     explicit ResponseSuccessSignInAllowed(uint8_t server_version, ClientID client_id, AESKey aes_key)
         : Response(server_version, ResponseCode::sign_in_allowed, payload_size), client_id(client_id), aes_key(std::move(aes_key)){};
 
@@ -522,12 +515,11 @@ namespace
     }
   };
 
-  class ResponseFailureSignInRejected final : public Response
+  struct ResponseFailureSignInRejected final : public Response
   {
     ClientID client_id;
     static constexpr uint32_t payload_size = sizeof(client_id);
 
-  public:
     explicit ResponseFailureSignInRejected(uint8_t server_version, ClientID client_id)
         : Response(server_version, ResponseCode::sign_in_rejected, payload_size), client_id(client_id){};
 
@@ -538,11 +530,10 @@ namespace
     }
   };
 
-  class ResponseErrorGeneral final : public Response
+  struct ResponseErrorGeneral final : public Response
   {
     static constexpr uint32_t payload_size = 0;
 
-  public:
     explicit ResponseErrorGeneral(uint8_t server_version)
         : Response(server_version, ResponseCode::general_error, payload_size){};
 
