@@ -918,18 +918,18 @@ namespace maman15
     InstructionsFileContent(boost::asio::ip::address ip, uint16_t port, ClientName &&client_name, std::filesystem::path file_path)
         : ip(ip), port(port), client_name(std::move(client_name)), file_path(file_path){};
 
-    static std::optional<InstructionsFileContent> load() // TODO: return unique_ptr instead?
+    static std::unique_ptr<InstructionsFileContent> load()
     {
       std::filesystem::path instructions_file_path{instructions_file_name};
       if (!std::filesystem::exists(instructions_file_path))
       {
         log("Instructions file (", instructions_file_name, ") does not exist.");
-        return std::nullopt;
+        return {};
       }
       std::ifstream file(instructions_file_path);
       if (!file.is_open())
       {
-        return std::nullopt;
+        return {};
       }
 
       std::string line;
@@ -937,42 +937,42 @@ namespace maman15
       // Read IP and port
       if (!std::getline(file, line))
       {
-        return std::nullopt;
+        return {};
       }
       std::stringstream ss(line);
       std::string ipStr;
       uint16_t port;
       if (!std::getline(ss, ipStr, ':') || !(ss >> port))
       {
-        return std::nullopt;
+        return {};
       }
       auto ip = boost::asio::ip::address::from_string(ipStr);
 
       // Read client name
       if (!std::getline(file, line))
       {
-        return std::nullopt;
+        return {};
       }
       auto client_name = ClientName::from_string(line);
       if (!client_name)
       {
-        return std::nullopt;
+        return {};
       }
 
       // Read file path
       if (!std::getline(file, line))
       {
-        return std::nullopt;
+        return {};
       }
       std::filesystem::path file_path{line};
 
       // Make sure there are no more lines
       if (std::getline(file, line))
       {
-        return std::nullopt;
+        return {};
       }
 
-      return std::make_optional<InstructionsFileContent>(ip, port, std::move(client_name.value()), file_path);
+      return std::make_unique<InstructionsFileContent>(ip, port, std::move(client_name.value()), file_path);
     }
 
     friend std::ostream &operator<<(std::ostream &os, const InstructionsFileContent &instructions)
@@ -1004,13 +1004,13 @@ namespace maman15
     IdentifierFileContent(ClientName &&client_name, ClientID &&client_id, PrivateKey &&private_key)
         : client_name(std::move(client_name)), client_id(std::move(client_id)), private_key(std::move(private_key)){};
 
-    static std::optional<IdentifierFileContent> load()
+    static std::unique_ptr<IdentifierFileContent> load()
     {
       std::filesystem::path identifier_file_path{identifier_file_name};
       std::ifstream file(identifier_file_path);
       if (!file.is_open())
       {
-        return std::nullopt;
+        return {};
       }
 
       std::string line;
@@ -1018,43 +1018,43 @@ namespace maman15
       // Read client name
       if (!std::getline(file, line))
       {
-        return std::nullopt;
+        return {};
       }
       auto client_name = ClientName::from_string(line);
       if (!client_name)
       {
-        return std::nullopt;
+        return {};
       }
 
       // Read client uid
       if (!std::getline(file, line))
       {
-        return std::nullopt;
+        return {};
       }
       auto id = ClientID::from_string(line);
       if (!id)
       {
-        return std::nullopt;
+        return {};
       }
 
       // Read client's private key
       if (!std::getline(file, line))
       {
-        return std::nullopt;
+        return {};
       }
       auto private_key = PrivateKey::from_string(line);
       if (!private_key)
       {
-        return std::nullopt;
+        return {};
       }
 
       // Make sure there are no more lines
       if (std::getline(file, line))
       {
-        return std::nullopt;
+        return {};
       }
 
-      return std::make_optional<IdentifierFileContent>(std::move(client_name.value()), std::move(id.value()), std::move(private_key.value()));
+      return std::make_unique<IdentifierFileContent>(std::move(client_name.value()), std::move(id.value()), std::move(private_key.value()));
     }
 
     const bool save() const
@@ -1088,13 +1088,13 @@ namespace maman15
     PrivateKeyFileContent(PrivateKey &&private_key)
         : private_key(std::move(private_key)){};
 
-    static std::optional<PrivateKeyFileContent> load()
+    static std::unique_ptr<PrivateKeyFileContent> load()
     {
       std::filesystem::path private_key_file_path{private_key_file_name};
       std::ifstream file(private_key_file_path);
       if (!file.is_open())
       {
-        return std::nullopt;
+        return {};
       }
 
       std::string line;
@@ -1102,21 +1102,21 @@ namespace maman15
       // Read client's private key
       if (!std::getline(file, line))
       {
-        return std::nullopt;
+        return {};
       }
       auto private_key = PrivateKey::from_string(line);
       if (!private_key)
       {
-        return std::nullopt;
+        return {};
       }
 
       // Make sure there are no more lines
       if (std::getline(file, line))
       {
-        return std::nullopt;
+        return {};
       }
 
-      return std::make_optional<PrivateKeyFileContent>(std::move(private_key.value()));
+      return std::make_unique<PrivateKeyFileContent>(std::move(private_key.value()));
     }
   };
 } // namespace maman15
@@ -1220,13 +1220,21 @@ namespace maman15
 // +----------------------------------------------------------------------------------+
 namespace maman15
 {
-  Client::Client()
+  Client::Client(std::unique_ptr<InstructionsFileContent> instructions_file_content)
       : socket(io_context)
   {
+    // TODO: uncomment when the server is ready
+    // boost::asio::ip::tcp::resolver resolver(io_context);
+    // boost::asio::ip::tcp::endpoint endpoint(instructions_file_content->ip, instructions_file_content->port);
+    // boost::asio::ip::tcp::resolver::results_type endpoints = resolver.resolve(endpoint);
+    // boost::asio::connect(socket, endpoints);
+
+    this->instructions_file_content = std::move(instructions_file_content);
+
     log("Client created");
   }
 
-  std::unique_ptr<Client> Client::create()
+  std::shared_ptr<Client> Client::create()
   {
     auto instructions_file = InstructionsFileContent::load();
     if (!instructions_file)
@@ -1235,26 +1243,16 @@ namespace maman15
       return {};
     }
     log(*instructions_file);
-    Client client{};
 
-    std::unique_ptr client_ptr = std::make_unique<Client>();
-    // client.instructions_file_content = std::make_unique<InstructionsFileContent>(std::move(instructions_file.value()));
-
-    // Connect to server... move to client c'tor?
-    // try
-    // {
-    //   boost::asio::ip::tcp::resolver resolver(client.io_context);
-    //   boost::asio::ip::tcp::endpoint endpoint(instructions_file->ip, instructions_file->port);
-    //   boost::asio::ip::tcp::resolver::results_type endpoints = resolver.resolve(endpoint);
-    //   boost::asio::connect(client.socket, endpoints);
-    // }
-    // catch (const std::exception &e)
-    // {
-    //   log("Failed to connect to server: ", e.what());
-    //   return std::nullopt;
-    // }
-
-    return {}; // TODO: WIP. idk. return unique_ptr instead?
+    try
+    {
+      return std::make_shared<Client>(std::move(instructions_file));
+    }
+    catch (const std::exception &e)
+    {
+      log("Failed to create client: ", e.what());
+      return {};
+    }
   }
 
   bool Client::register_to_server()
