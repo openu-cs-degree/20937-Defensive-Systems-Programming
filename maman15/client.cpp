@@ -284,7 +284,8 @@ namespace
 
   struct AESKey
   {
-    std::array<uint8_t, 256> key;
+    static constexpr size_t key_len = 32;
+    std::array<uint8_t, key_len> key;
     friend std::ostream &operator<<(std::ostream &os, const AESKey &aes_key)
     {
       os << aes_key.key.data();
@@ -294,7 +295,8 @@ namespace
 
   struct RSAKey
   {
-    std::array<uint8_t, 160> key;
+    static constexpr size_t key_len = 160;
+    std::array<uint8_t, key_len> key;
     friend std::ostream &operator<<(std::ostream &os, const RSAKey &rsa_key)
     {
       os << rsa_key.key.data();
