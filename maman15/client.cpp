@@ -292,12 +292,12 @@ namespace
     }
   };
 
-  struct PublicKey
+  struct RSAKey
   {
     std::array<uint8_t, 160> key;
-    friend std::ostream &operator<<(std::ostream &os, const PublicKey &public_key)
+    friend std::ostream &operator<<(std::ostream &os, const RSAKey &rsa_key)
     {
-      os << public_key.key.data();
+      os << rsa_key.key.data();
       return os;
     }
   };
@@ -591,11 +591,11 @@ namespace
   class RequestSendPublicKey final : public Request
   {
     ClientName name;
-    PublicKey public_key;
+    RSAKey public_key;
     static constexpr uint32_t payload_size = sizeof(name) + sizeof(public_key);
 
   public:
-    explicit RequestSendPublicKey(ClientID client_id, ClientName name, PublicKey public_key)
+    explicit RequestSendPublicKey(ClientID client_id, ClientName name, RSAKey public_key)
         : Request(client_id, RequestCode::send_public_key, payload_size), name(std::move(name)), public_key(std::move(public_key)){};
 
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
