@@ -234,6 +234,16 @@ namespace
     uint64_t upper;
     uint64_t lower;
 
+    bool operator==(const ClientID &other) const
+    {
+      return upper == other.upper && lower == other.lower;
+    }
+
+    bool operator!=(const ClientID &other) const
+    {
+      return !(*this == other);
+    }
+
     static std::optional<ClientID> from_string(const std::string &str)
     {
       static constexpr auto max_len = 32; // 128 bits = 16 bytes = 32 hex characters
@@ -1121,29 +1131,49 @@ namespace maman15
 {
   bool Client::sign_in()
   {
-    auto identifier_file = IdentifierFileContent::load();
-    if (!identifier_file)
+    identifier_file_content = IdentifierFileContent::load(); // technically, I could just use the pre-loaded member variable
+    if (!identifier_file_content)
     {
-      log("Failed to read me file");
+      log("Failed to read ", identifier_file_name, " file");
       return false;
     }
-    // identifier_file_content = std::make_unique<IdentifierFileContent>(std::move(identifier_file.value()));
 
-    if (!send_request(RequestSignIn{identifier_file->client_id, identifier_file->client_name}, socket))
+    if (!send_request(RequestSignIn{identifier_file_content->client_id, identifier_file_content->client_name}, socket))
     {
-      log("Failed to send client id");
+      log("Failed to send sign-in request");
       return false;
     }
 
     if (auto response = receive_response(socket))
     {
       log("Received reponse");
-      // TODO: handle response
-      return true;
+      bool signed_in_successfully = std::visit(
+          [&](auto &&res) -> bool {
+            using T = std::decay_t<decltype(res)>;
+            if constexpr (std::is_same_v<T, ResponseSuccessSignInAllowed>)
+            {
+              log("Received sign in allowed response");
+              if (res.client_id != identifier_file_content->client_id)
+              {
+                log("Received client_id does not match the one in the identifier file");
+                return false;
+              }
+              // TODO: save the AES key... some... where?
+              return true;
+            }
+            else
+            {
+              log("Did not receive sign in allowed response");
+              return false;
+            }
+          },
+          response.value());
+
+      return signed_in_successfully;
     }
     else
     {
-      log("Failed to receive client id");
+      log("Failed to receive response from the server");
       return false;
     }
   }
@@ -1152,54 +1182,46 @@ namespace maman15
   {
     if (!send_request(RequestSignUp{instructions_file_content->client_name}, socket))
     {
-      log("Failed to send client name");
+      log("Failed to send sign up request");
       return false;
     }
 
     if (auto response = receive_response(socket); !response)
     {
-      log("Failed to receive client id");
+      log("Failed to receive response from the server");
       return false;
     }
     else
     {
       log("Received reponse");
-      bool result = std::visit(
-          [&](auto &&arg) -> bool {
-            using T = std::decay_t<decltype(arg)>;
+      bool signed_up_successfully = std::visit(
+          [&](auto &&res) -> bool {
+            using T = std::decay_t<decltype(res)>;
             if constexpr (std::is_same_v<T, ResponseSuccessSignUp>)
             {
               log("Received sign up response");
-              identifier_file_content = std::make_unique<IdentifierFileContent>(instructions_file_content->client_name, arg.client_id);
-              if (identifier_file_content->save())
+              identifier_file_content = std::make_unique<IdentifierFileContent>(instructions_file_content->client_name, res.client_id);
+              if (!identifier_file_content)
               {
-                return true;
-              }
-              else
-              {
-                log("Failed to write me file");
+                log("Failed to create ", identifier_file_name, " file");
                 return false;
               }
-            }
-            else if constexpr (std::is_same_v<T, ResponseFailureSignUp>)
-            {
-              log("Received sign up failed response");
-              return false;
-            }
-            else if constexpr (std::is_same_v<T, ResponseErrorGeneral>)
-            {
-              log("Received general error");
-              return false;
+              if (!identifier_file_content->save())
+              {
+                log("Failed to save ", identifier_file_name, " file");
+                return false;
+              }
+              return true;
             }
             else
             {
-              log("Received unexpected response");
+              log("Did not receive sign up response");
               return false;
             }
           },
           response.value());
 
-      return result;
+      return signed_up_successfully;
     }
   }
 } // namespace maman15
@@ -1303,6 +1325,7 @@ namespace maman15
   bool Client::send_public_key()
   {
     log("Sending public key");
+
     return true;
   }
 
