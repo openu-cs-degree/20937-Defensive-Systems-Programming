@@ -1359,7 +1359,7 @@ namespace maman15
                   log("Received client_id does not match the one in the identifier file");
                   return false;
                 }
-                // TODO: save the AES key... some... where?
+                aes_key = std::move(res.aes_key);
                 return true;
               }
               else
@@ -1387,6 +1387,8 @@ namespace maman15
     std::unique_ptr<InstructionsFileContent> instructions_file_content;
     std::unique_ptr<PrivateKeyFileContent> private_key_file_content;
     std::unique_ptr<IdentifierFileContent> identifier_file_content;
+
+    std::optional<AESKey> aes_key;
   };
 } // namespace maman15
 
