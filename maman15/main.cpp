@@ -9,5 +9,8 @@ int main()
   {
     std::cout << "Failed to create client\n";
   }
-  client->temp();
+  else
+  {
+    client->temp();
+  }
 }

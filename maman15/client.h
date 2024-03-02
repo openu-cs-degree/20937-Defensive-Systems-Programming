@@ -56,14 +56,7 @@
 #pragma once
 
 #include <filesystem>
-#include <optional>
-#include <string_view>
-
-#pragma warning(push)
-#pragma warning(disable : 6001 6031 6101 6255 6258 6313 6387)
-#include <boost/asio.hpp>
-#pragma warning(pop)
-#pragma endregion
+#include <memory>
 
 namespace maman15
 {
@@ -73,42 +66,25 @@ namespace maman15
     static constexpr inline uint32_t version = 3;
 
   private:
-    struct InstructionsFileContent;
-    struct PrivateKeyFileContent;
-    struct IdentifierFileContent;
-
-    static constexpr inline std::string_view instructions_file_name = "transfer.info"; // TODO: make std::filesystem::path?
-    static constexpr inline std::string_view private_key_file_name = "priv.key";
-    static constexpr inline std::string_view identifier_file_name = "me.info";
-
-    using tcp = boost::asio::ip::tcp;
+    class Impl;
+    Client(std::unique_ptr<Impl> &&impl);
 
   public:
     static std::shared_ptr<Client> create();
 
-    Client(std::unique_ptr<InstructionsFileContent> instructions_file_content);
     Client(const Client &) = delete;
     Client &operator=(const Client &) = delete;
     Client(Client &&) = default;
     Client &operator=(Client &&) = default;
     ~Client();
 
-    bool register_to_server();
-    bool send_public_key();
-    bool send_file(const std::filesystem::path &file_path);
-    bool validate_crc();
+    const bool register_to_server();
+    const bool send_public_key();
+    const bool send_file(const std::filesystem::path &file_path);
+    const bool validate_crc();
     void temp();
 
   private:
-    boost::asio::io_context io_context;
-    boost::asio::ip::tcp::socket socket;
-
-    std::unique_ptr<InstructionsFileContent> instructions_file_content;
-    std::unique_ptr<PrivateKeyFileContent> private_key_file_content;
-    std::unique_ptr<IdentifierFileContent> identifier_file_content;
-
-    bool clear_socket();
-    bool sign_up();
-    bool sign_in();
+    std::unique_ptr<Impl> pImpl;
   };
 } // namespace maman15

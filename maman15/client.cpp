@@ -20,6 +20,11 @@
 #include <base64.h>
 #include <osrng.h>
 #include <rsa.h>
+
+#pragma warning(push)
+#pragma warning(disable : 4242 4266 6001 6031 6101 6255 6258 6313 6387)
+#include <boost/asio.hpp>
+#pragma warning(pop)
 #pragma endregion
 
 #define DEBUG 1
@@ -964,8 +969,10 @@ namespace
 // +----------------------------------------------------------------------------------+
 namespace maman15
 {
-  struct Client::InstructionsFileContent
+  struct InstructionsFileContent
   {
+    static constexpr inline std::string_view instructions_file_name = "transfer.info";
+
     const boost::asio::ip::address ip;
     const uint16_t port;
     const ClientName client_name;
@@ -975,8 +982,8 @@ namespace maman15
     InstructionsFileContent() = delete;
     InstructionsFileContent(const InstructionsFileContent &) = delete;
     InstructionsFileContent &operator=(const InstructionsFileContent &) = delete;
-    InstructionsFileContent(InstructionsFileContent &&) = delete;
-    InstructionsFileContent &operator=(InstructionsFileContent &&) = delete;
+    InstructionsFileContent(InstructionsFileContent &&) = default;
+    InstructionsFileContent &operator=(InstructionsFileContent &&) = default;
 
     InstructionsFileContent(boost::asio::ip::address ip, uint16_t port, ClientName &&client_name, std::filesystem::path file_path)
         : ip(ip), port(port), client_name(std::move(client_name)), file_path(file_path){};
@@ -1048,8 +1055,10 @@ namespace maman15
     }
   };
 
-  struct Client::IdentifierFileContent
+  struct IdentifierFileContent
   {
+    static constexpr inline std::string_view identifier_file_name = "me.info";
+
     const ClientName client_name;
     const ClientID client_id;
     const PrivateKey private_key;
@@ -1058,14 +1067,20 @@ namespace maman15
     IdentifierFileContent() = delete;
     IdentifierFileContent(const IdentifierFileContent &) = delete;
     IdentifierFileContent &operator=(const IdentifierFileContent &) = delete;
-    IdentifierFileContent(IdentifierFileContent &&) = delete;
-    IdentifierFileContent &operator=(IdentifierFileContent &&) = delete;
+    IdentifierFileContent(IdentifierFileContent &&) = default;
+    IdentifierFileContent &operator=(IdentifierFileContent &&) = default;
 
     IdentifierFileContent(ClientName client_name, ClientID client_id)
         // TODO: this c'tor is temporary, and it here due to the unclear step #2 of the sign-up instruction.
         : client_name(client_name), client_id(client_id), private_key(PrivateKey{CryptoPP::RSA::PrivateKey{}}){};
     IdentifierFileContent(ClientName &&client_name, ClientID &&client_id, PrivateKey &&private_key)
         : client_name(std::move(client_name)), client_id(std::move(client_id)), private_key(std::move(private_key)){};
+
+    static const bool exists()
+    {
+      std::filesystem::path identifier_file_path{identifier_file_name};
+      return std::filesystem::exists(identifier_file_path);
+    }
 
     static std::unique_ptr<IdentifierFileContent> load()
     {
@@ -1137,16 +1152,18 @@ namespace maman15
     }
   };
 
-  struct Client::PrivateKeyFileContent
+  struct PrivateKeyFileContent
   {
+    static constexpr inline std::string_view private_key_file_name = "priv.key";
+
     const PrivateKey private_key;
 
   public:
     PrivateKeyFileContent() = delete;
     PrivateKeyFileContent(const PrivateKeyFileContent &) = delete;
     PrivateKeyFileContent &operator=(const PrivateKeyFileContent &) = delete;
-    PrivateKeyFileContent(PrivateKeyFileContent &&) = delete;
-    PrivateKeyFileContent &operator=(PrivateKeyFileContent &&) = delete;
+    PrivateKeyFileContent(PrivateKeyFileContent &&) = default;
+    PrivateKeyFileContent &operator=(PrivateKeyFileContent &&) = default;
 
     PrivateKeyFileContent(PrivateKey &&private_key)
         : private_key(std::move(private_key)){};
@@ -1185,109 +1202,193 @@ namespace maman15
 } // namespace maman15
 #pragma endregion
 
-#pragma region client_helper_functions
+#pragma region client_impl
 // +----------------------------------------------------------------------------------+
-// | Client: implementation of Client class helper functions                          |
+// | Client: implementation of Client::Impl class                                     |
 // +----------------------------------------------------------------------------------+
 namespace maman15
 {
-  bool Client::sign_in()
+  class Client::Impl
   {
-    identifier_file_content = IdentifierFileContent::load(); // technically, I could just use the pre-loaded member variable
-    if (!identifier_file_content)
+    using tcp = boost::asio::ip::tcp;
+
+  public:
+    Impl(std::unique_ptr<InstructionsFileContent> &&instructions_file_content)
+        : socket(io_context),
+          instructions_file_content(std::move(instructions_file_content)){
+              // TODO: uncomment when the server is ready
+              // boost::asio::ip::tcp::resolver resolver(io_context);
+              // boost::asio::ip::tcp::endpoint endpoint(instructions_file_content->ip, instructions_file_content->port);
+              // boost::asio::ip::tcp::resolver::results_type endpoints = resolver.resolve(endpoint);
+              // boost::asio::connect(socket, endpoints);
+          };
+
+    ~Impl() = default;
+
+    bool register_to_server()
     {
-      log("Failed to read ", identifier_file_name, " file");
+      log("Registering to server");
+
+      if (!instructions_file_content)
+      {
+        log("Client is corrupted. Try creating a new Client object.");
+        return false;
+      }
+
+      if (IdentifierFileContent::exists())
+      {
+        return sign_in();
+      }
+      else
+      {
+        return sign_up();
+      }
+    }
+
+    const bool send_public_key()
+    {
+      log("TODO: send public key");
+
       return false;
     }
 
-    if (!send_request(RequestSignIn{identifier_file_content->client_id, identifier_file_content->client_name}, socket))
+    const bool send_file(const std::filesystem::path &file_path)
     {
-      log("Failed to send sign-in request");
+      log("TODO: send file ", file_path);
+
       return false;
     }
 
-    if (auto response = receive_response(socket))
+    const bool validate_crc()
     {
-      log("Received reponse");
-      bool signed_in_successfully = std::visit(
-          [&](auto &&res) -> bool {
-            using T = std::decay_t<decltype(res)>;
-            if constexpr (std::is_same_v<T, ResponseSuccessSignInAllowed>)
-            {
-              log("Received sign in allowed response");
-              if (res.client_id != identifier_file_content->client_id)
+      log("TODO: validate CRC");
+
+      return false;
+    }
+
+  private:
+    bool clear_socket()
+    {
+      boost::system::error_code error;
+      boost::asio::streambuf discard_buffer;
+      while (socket.available())
+      {
+        socket.read_some(discard_buffer.prepare(socket.available()), error);
+        discard_buffer.commit(socket.available());
+        if (error)
+        {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    bool sign_up()
+    {
+      if (!send_request(RequestSignUp{instructions_file_content->client_name}, socket))
+      {
+        log("Failed to send sign up request");
+        return false;
+      }
+
+      if (auto response = receive_response(socket); !response)
+      {
+        log("Failed to receive response from the server");
+        return false;
+      }
+      else
+      {
+        log("Received reponse");
+        bool signed_up_successfully = std::visit(
+            [&](auto &&res) -> bool {
+              using T = std::decay_t<decltype(res)>;
+              if constexpr (std::is_same_v<T, ResponseSuccessSignUp>)
               {
-                log("Received client_id does not match the one in the identifier file");
+                log("Received sign up response");
+                identifier_file_content = std::make_unique<IdentifierFileContent>(instructions_file_content->client_name, res.client_id);
+                if (!identifier_file_content)
+                {
+                  log("Failed to create ", IdentifierFileContent::identifier_file_name, " file");
+                  return false;
+                }
+                if (!identifier_file_content->save())
+                {
+                  log("Failed to save ", IdentifierFileContent::identifier_file_name, " file");
+                  return false;
+                }
+                return true;
+              }
+              else
+              {
+                log("Did not receive sign up response");
                 return false;
               }
-              // TODO: save the AES key... some... where?
-              return true;
-            }
-            else
-            {
-              log("Did not receive sign in allowed response");
-              return false;
-            }
-          },
-          response.value());
+            },
+            response.value());
 
-      return signed_in_successfully;
-    }
-    else
-    {
-      log("Failed to receive response from the server");
-      return false;
-    }
-  }
-
-  bool Client::sign_up()
-  {
-    if (!send_request(RequestSignUp{instructions_file_content->client_name}, socket))
-    {
-      log("Failed to send sign up request");
-      return false;
+        return signed_up_successfully;
+      }
     }
 
-    if (auto response = receive_response(socket); !response)
+    bool sign_in()
     {
-      log("Failed to receive response from the server");
-      return false;
-    }
-    else
-    {
-      log("Received reponse");
-      bool signed_up_successfully = std::visit(
-          [&](auto &&res) -> bool {
-            using T = std::decay_t<decltype(res)>;
-            if constexpr (std::is_same_v<T, ResponseSuccessSignUp>)
-            {
-              log("Received sign up response");
-              identifier_file_content = std::make_unique<IdentifierFileContent>(instructions_file_content->client_name, res.client_id);
-              if (!identifier_file_content)
+      identifier_file_content = IdentifierFileContent::load(); // technically, I could just use the pre-loaded member variable
+      if (!identifier_file_content)
+      {
+        log("Failed to read ", IdentifierFileContent::identifier_file_name, " file");
+        return false;
+      }
+
+      if (!send_request(RequestSignIn{identifier_file_content->client_id, identifier_file_content->client_name}, socket))
+      {
+        log("Failed to send sign-in request");
+        return false;
+      }
+
+      if (auto response = receive_response(socket))
+      {
+        log("Received reponse");
+        bool signed_in_successfully = std::visit(
+            [&](auto &&res) -> bool {
+              using T = std::decay_t<decltype(res)>;
+              if constexpr (std::is_same_v<T, ResponseSuccessSignInAllowed>)
               {
-                log("Failed to create ", identifier_file_name, " file");
+                log("Received sign in allowed response");
+                if (res.client_id != identifier_file_content->client_id)
+                {
+                  log("Received client_id does not match the one in the identifier file");
+                  return false;
+                }
+                // TODO: save the AES key... some... where?
+                return true;
+              }
+              else
+              {
+                log("Did not receive sign in allowed response");
                 return false;
               }
-              if (!identifier_file_content->save())
-              {
-                log("Failed to save ", identifier_file_name, " file");
-                return false;
-              }
-              return true;
-            }
-            else
-            {
-              log("Did not receive sign up response");
-              return false;
-            }
-          },
-          response.value());
+            },
+            response.value());
 
-      return signed_up_successfully;
+        return signed_in_successfully;
+      }
+      else
+      {
+        log("Failed to receive response from the server");
+        return false;
+      }
     }
-  }
+
+  public:
+    boost::asio::io_context io_context;
+    boost::asio::ip::tcp::socket socket;
+
+    // TODO: std::optional instead?
+    std::unique_ptr<InstructionsFileContent> instructions_file_content;
+    std::unique_ptr<PrivateKeyFileContent> private_key_file_content;
+    std::unique_ptr<IdentifierFileContent> identifier_file_content;
+  };
 } // namespace maman15
-#pragma endregion
 
 #pragma region client
 // +----------------------------------------------------------------------------------+
@@ -1295,33 +1396,32 @@ namespace maman15
 // +----------------------------------------------------------------------------------+
 namespace maman15
 {
-  Client::Client(std::unique_ptr<InstructionsFileContent> instructions_file_content)
-      : socket(io_context)
+  Client::Client(std::unique_ptr<Impl> &&pImpl)
+      : pImpl(std::move(pImpl))
   {
-    // TODO: uncomment when the server is ready
-    // boost::asio::ip::tcp::resolver resolver(io_context);
-    // boost::asio::ip::tcp::endpoint endpoint(instructions_file_content->ip, instructions_file_content->port);
-    // boost::asio::ip::tcp::resolver::results_type endpoints = resolver.resolve(endpoint);
-    // boost::asio::connect(socket, endpoints);
-
-    this->instructions_file_content = std::move(instructions_file_content);
-
-    log("Client created");
+    log("Client created successfully");
   }
 
   std::shared_ptr<Client> Client::create()
   {
-    auto instructions_file = InstructionsFileContent::load();
-    if (!instructions_file)
+    struct ConcreteClient : public Client
     {
-      log("Failed to read transfer file");
-      return {};
-    }
-    log(*instructions_file);
+      ConcreteClient(std::unique_ptr<Impl> &&pImpl)
+          : Client(std::move(pImpl)){};
+    }; // to make std::make_shared stfu
 
     try
     {
-      return std::make_shared<Client>(std::move(instructions_file));
+      auto instructions_file = InstructionsFileContent::load();
+      if (!instructions_file)
+      {
+        log("Failed to read transfer file");
+        return {};
+      }
+      log(*instructions_file);
+
+      std::unique_ptr<Impl> pImpl = std::make_unique<Impl>(std::move(instructions_file));
+      return std::make_shared<ConcreteClient>(std::move(pImpl));
     }
     catch (const std::exception &e)
     {
@@ -1330,24 +1430,9 @@ namespace maman15
     }
   }
 
-  bool Client::register_to_server()
+  const bool Client::register_to_server()
   {
-    log("Registering to server");
-
-    if (!instructions_file_content)
-    {
-      log("Something's wrong. Try creating a new Client object.");
-      return false;
-    }
-
-    if (std::filesystem::exists(identifier_file_name))
-    {
-      return sign_in();
-    }
-    else
-    {
-      return sign_up();
-    }
+    return pImpl->register_to_server();
   }
 
   void Client::temp()
@@ -1384,39 +1469,19 @@ namespace maman15
     }
   }
 
-  bool Client::send_public_key()
+  const bool Client::send_public_key()
   {
-    log("Sending public key");
-
-    return true;
+    return pImpl->send_public_key();
   }
 
-  bool Client::send_file(const std::filesystem::path &file_path)
+  const bool Client::send_file(const std::filesystem::path &file_path)
   {
-    log("Sending file: ", file_path);
-    return true;
+    return pImpl->send_file(file_path);
   }
 
-  bool Client::validate_crc()
+  const bool Client::validate_crc()
   {
-    log("Validating CRC");
-    return true;
-  }
-
-  bool Client::clear_socket()
-  {
-    boost::system::error_code error;
-    boost::asio::streambuf discard_buffer;
-    while (socket.available())
-    {
-      socket.read_some(discard_buffer.prepare(socket.available()), error);
-      discard_buffer.commit(socket.available());
-      if (error)
-      {
-        return false;
-      }
-    }
-    return true;
+    return pImpl->validate_crc();
   }
 
   Client::~Client() = default;
