@@ -112,6 +112,135 @@ namespace
 } // anonymous namespace
 #pragma endregion
 
+#pragma region crypt
+// +----------------------------------------------------------------------------------+
+// | Crypt: encryption and decryption utilities                                       |
+// +----------------------------------------------------------------------------------+
+namespace
+{
+  CryptoPP::AutoSeededRandomPool rng{};
+
+  // std::vector<uint8_t> generate_key();
+  void encrypt([[maybe_unused]] const std::vector<uint8_t> &data)
+  {
+    // ...
+  }
+
+  void decrypt([[maybe_unused]] const std::vector<uint8_t> &data)
+  {
+    // ...
+  }
+
+  class PublicKey
+  {
+  public:
+    struct Raw
+    {
+      static constexpr size_t key_len = 128; // 1024 bits
+      std::array<uint8_t, key_len> key;
+      const uint8_t *data() const
+      {
+        return key.data();
+      }
+      friend std::ostream &operator<<(std::ostream &os, const PublicKey::Raw &key)
+      {
+        os << key.data();
+        return os;
+      }
+    };
+
+  private:
+    const CryptoPP::RSA::PublicKey key;
+
+  public:
+    PublicKey() = delete;
+    PublicKey(const PublicKey &) = delete;
+    PublicKey &operator=(const PublicKey &) = delete;
+    PublicKey(PublicKey &&) = default;
+    PublicKey &operator=(PublicKey &&) = default;
+
+    PublicKey(const CryptoPP::RSA::PublicKey &&key)
+        : key(key){};
+
+    static std::optional<PublicKey> from_string(const std::string &str)
+    {
+      CryptoPP::RSA::PublicKey public_key;
+      std::string decoded_key;
+      CryptoPP::StringSource ss(str, true, new CryptoPP::Base64Decoder(new CryptoPP::StringSink(decoded_key)));
+      public_key.Load(CryptoPP::StringSource(decoded_key, true).Ref());
+      if (!public_key.Validate(rng, 3))
+      {
+        return std::nullopt;
+      }
+      return std::make_optional<PublicKey>(std::move(public_key));
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, const PublicKey &public_key)
+    {
+      std::string encoded_key;
+      public_key.key.Save(CryptoPP::Base64Encoder(new CryptoPP::StringSink(encoded_key)).Ref());
+
+      os << encoded_key;
+      return os;
+    }
+  };
+
+  class PrivateKey
+  {
+  public:
+    struct Raw
+    {
+      static constexpr size_t key_len = 160;
+      std::array<uint8_t, key_len> key;
+      const inline uint8_t *data() const
+      {
+        return key.data();
+      }
+      friend std::ostream &operator<<(std::ostream &os, const PrivateKey::Raw &key)
+      {
+        os << key.data();
+        return os;
+      }
+    };
+
+  private:
+    const CryptoPP::RSA::PrivateKey key;
+
+  public:
+    PrivateKey() = delete;
+    PrivateKey(const PrivateKey &) = delete;
+    PrivateKey &operator=(const PrivateKey &) = delete;
+    PrivateKey(PrivateKey &&) = default;
+    PrivateKey &operator=(PrivateKey &&) = default;
+
+    PrivateKey(const CryptoPP::RSA::PrivateKey &&key)
+        : key(key){};
+
+    static std::optional<PrivateKey> from_string(const std::string &str)
+    {
+      CryptoPP::RSA::PrivateKey private_key;
+      std::string decoded_key;
+      CryptoPP::StringSource ss(str, true, new CryptoPP::Base64Decoder(new CryptoPP::StringSink(decoded_key)));
+      private_key.Load(CryptoPP::StringSource(decoded_key, true).Ref());
+      if (!private_key.Validate(rng, 3))
+      {
+        return std::nullopt;
+      }
+      return std::make_optional<PrivateKey>(std::move(private_key));
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, const PrivateKey &private_key)
+    {
+      std::string encoded_key;
+      private_key.key.Save(CryptoPP::Base64Encoder(new CryptoPP::StringSink(encoded_key)).Ref());
+
+      os << encoded_key;
+      return os;
+    }
+  };
+} // namespace
+#pragma endregion
+
 #pragma region protocol
 // +----------------------------------------------------------------------------------+
 // | Definition of this project's protocol:                                           |
@@ -284,22 +413,11 @@ namespace
 
   struct AESKey
   {
-    static constexpr size_t key_len = 32;
+    static constexpr size_t key_len = 32; // 256 bits
     std::array<uint8_t, key_len> key;
     friend std::ostream &operator<<(std::ostream &os, const AESKey &aes_key)
     {
       os << aes_key.key.data();
-      return os;
-    }
-  };
-
-  struct RSAKey
-  {
-    static constexpr size_t key_len = 160;
-    std::array<uint8_t, key_len> key;
-    friend std::ostream &operator<<(std::ostream &os, const RSAKey &rsa_key)
-    {
-      os << rsa_key.key.data();
       return os;
     }
   };
@@ -593,11 +711,11 @@ namespace
   class RequestSendPublicKey final : public Request
   {
     ClientName name;
-    RSAKey public_key;
+    PublicKey::Raw public_key;
     static constexpr uint32_t payload_size = sizeof(name) + sizeof(public_key);
 
   public:
-    explicit RequestSendPublicKey(ClientID client_id, ClientName name, RSAKey public_key)
+    explicit RequestSendPublicKey(ClientID client_id, ClientName name, PublicKey::Raw public_key)
         : Request(client_id, RequestCode::send_public_key, payload_size), name(std::move(name)), public_key(std::move(public_key)){};
 
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
@@ -838,64 +956,6 @@ namespace
   }
 #pragma pack(pop)
 } // anonymous namespace
-#pragma endregion
-
-#pragma region crypt
-// +----------------------------------------------------------------------------------+
-// | Crypt: encryption and decryption utilities                                       |
-// +----------------------------------------------------------------------------------+
-namespace
-{
-  CryptoPP::AutoSeededRandomPool rng{};
-
-  // std::vector<uint8_t> generate_key();
-  void encrypt([[maybe_unused]] const std::vector<uint8_t> &data)
-  {
-    // ...
-  }
-
-  void decrypt([[maybe_unused]] const std::vector<uint8_t> &data)
-  {
-    // ...
-  }
-
-  struct PrivateKey
-  {
-    const CryptoPP::RSA::PrivateKey key;
-
-  public:
-    PrivateKey() = delete;
-    PrivateKey(const PrivateKey &) = delete;
-    PrivateKey &operator=(const PrivateKey &) = delete;
-    PrivateKey(PrivateKey &&) = default;
-    PrivateKey &operator=(PrivateKey &&) = default;
-
-    PrivateKey(const CryptoPP::RSA::PrivateKey &&key)
-        : key(key){};
-
-    static std::optional<PrivateKey> from_string(const std::string &str)
-    {
-      CryptoPP::RSA::PrivateKey private_key;
-      std::string decoded_key;
-      CryptoPP::StringSource ss(str, true, new CryptoPP::Base64Decoder(new CryptoPP::StringSink(decoded_key)));
-      private_key.Load(CryptoPP::StringSource(decoded_key, true).Ref());
-      if (!private_key.Validate(rng, 3))
-      {
-        return std::nullopt;
-      }
-      return std::make_optional<PrivateKey>(std::move(private_key));
-    }
-
-    friend std::ostream &operator<<(std::ostream &os, const PrivateKey &private_key)
-    {
-      std::string encoded_key;
-      private_key.key.Save(CryptoPP::Base64Encoder(new CryptoPP::StringSink(encoded_key)).Ref());
-
-      os << encoded_key;
-      return os;
-    }
-  };
-} // namespace
 #pragma endregion
 
 #pragma region file_management
