@@ -123,7 +123,7 @@ namespace
 // +----------------------------------------------------------------------------------+
 namespace
 {
-  CryptoPP::AutoSeededRandomPool rng{};
+  CryptoPP::AutoSeededRandomPool rng{}; // TODO: not global?
 
   // std::vector<uint8_t> generate_key();
   void encrypt([[maybe_unused]] const std::vector<uint8_t> &data)
@@ -135,60 +135,6 @@ namespace
   {
     // ...
   }
-
-  class PublicKey
-  {
-  public:
-    struct Raw
-    {
-      static constexpr size_t key_len = 128; // 1024 bits
-      std::array<uint8_t, key_len> key;
-      const uint8_t *data() const
-      {
-        return key.data();
-      }
-      friend std::ostream &operator<<(std::ostream &os, const PublicKey::Raw &key)
-      {
-        os << key.data();
-        return os;
-      }
-    };
-
-  private:
-    const CryptoPP::RSA::PublicKey key;
-
-  public:
-    PublicKey() = delete;
-    PublicKey(const PublicKey &) = delete;
-    PublicKey &operator=(const PublicKey &) = delete;
-    PublicKey(PublicKey &&) = default;
-    PublicKey &operator=(PublicKey &&) = default;
-
-    PublicKey(const CryptoPP::RSA::PublicKey &&key)
-        : key(key){};
-
-    static std::optional<PublicKey> from_string(const std::string &str)
-    {
-      CryptoPP::RSA::PublicKey public_key;
-      std::string decoded_key;
-      CryptoPP::StringSource ss(str, true, new CryptoPP::Base64Decoder(new CryptoPP::StringSink(decoded_key)));
-      public_key.Load(CryptoPP::StringSource(decoded_key, true).Ref());
-      if (!public_key.Validate(rng, 3))
-      {
-        return std::nullopt;
-      }
-      return std::make_optional<PublicKey>(std::move(public_key));
-    }
-
-    friend std::ostream &operator<<(std::ostream &os, const PublicKey &public_key)
-    {
-      std::string encoded_key;
-      public_key.key.Save(CryptoPP::Base64Encoder(new CryptoPP::StringSink(encoded_key)).Ref());
-
-      os << encoded_key;
-      return os;
-    }
-  };
 
   class PrivateKey
   {
@@ -209,17 +155,23 @@ namespace
     };
 
   private:
-    const CryptoPP::RSA::PrivateKey key;
+    static constexpr unsigned int modulus_bits = 1024;
+
+    CryptoPP::RSA::PrivateKey key;
 
   public:
-    PrivateKey() = delete;
     PrivateKey(const PrivateKey &) = delete;
     PrivateKey &operator=(const PrivateKey &) = delete;
     PrivateKey(PrivateKey &&) = default;
     PrivateKey &operator=(PrivateKey &&) = default;
 
-    PrivateKey(const CryptoPP::RSA::PrivateKey &&key)
-        : key(key){};
+    PrivateKey()
+    {
+      key.Initialize(rng, modulus_bits);
+    };
+
+    PrivateKey(CryptoPP::RSA::PrivateKey &&key)
+        : key(std::move(key)){};
 
     static std::optional<PrivateKey> from_string(const std::string &str)
     {
@@ -234,10 +186,93 @@ namespace
       return std::make_optional<PrivateKey>(std::move(private_key));
     }
 
+    explicit operator std::string() const
+    {
+      CryptoPP::RSAFunction public_key{key};
+      std::string encoded_key;
+      CryptoPP::StringSink ss{encoded_key};
+      public_key.Save(ss);
+      return encoded_key;
+    }
+
     friend std::ostream &operator<<(std::ostream &os, const PrivateKey &private_key)
     {
       std::string encoded_key;
       private_key.key.Save(CryptoPP::Base64Encoder(new CryptoPP::StringSink(encoded_key)).Ref());
+
+      os << encoded_key;
+      return os;
+    }
+  };
+
+  class PublicKey
+  {
+  public:
+    struct Raw
+    {
+      static constexpr size_t key_len = 160;
+      std::array<uint8_t, key_len> key;
+      Raw(const PublicKey &public_key)
+      {
+        const CryptoPP::Integer &n = public_key.key.GetModulus();
+        const CryptoPP::Integer &e = public_key.key.GetPublicExponent();
+
+        CryptoPP::ArraySink key_sink{key.data(), key.size()};
+        n.Encode(key_sink, key.size());
+        e.Encode(key_sink, key.size());
+      }
+      const uint8_t *data() const
+      {
+        return key.data();
+      }
+      friend std::ostream &operator<<(std::ostream &os, const PublicKey::Raw &key)
+      {
+        os << key.data();
+        return os;
+      }
+    };
+
+  private:
+    CryptoPP::RSA::PublicKey key;
+
+  public:
+    PublicKey() = delete;
+    PublicKey(const PublicKey &) = delete;
+    PublicKey &operator=(const PublicKey &) = delete;
+    PublicKey(PublicKey &&) = default;
+    PublicKey &operator=(PublicKey &&) = default;
+
+    PublicKey(const std::string &str)
+    {
+      CryptoPP::StringSource ss(str, true);
+      key.Load(ss);
+    }
+
+    PublicKey(const CryptoPP::RSA::PublicKey &&key)
+        : key(key){};
+
+    static std::optional<PublicKey> from_string(const std::string &str)
+    {
+      CryptoPP::RSA::PublicKey public_key;
+      std::string decoded_key;
+      CryptoPP::StringSource ss(str, true, new CryptoPP::Base64Decoder(new CryptoPP::StringSink(decoded_key)));
+      public_key.Load(CryptoPP::StringSource(decoded_key, true).Ref());
+      if (!public_key.Validate(rng, 3))
+      {
+        return std::nullopt;
+      }
+      return std::make_optional<PublicKey>(std::move(public_key));
+    }
+
+    const PublicKey::Raw get_raw() const
+    {
+      return PublicKey::Raw{*this};
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, const PublicKey &public_key)
+    {
+      std::string encoded_key;
+      public_key.key.Save(CryptoPP::Base64Encoder(new CryptoPP::StringSink(encoded_key)).Ref());
 
       os << encoded_key;
       return os;
@@ -1198,6 +1233,20 @@ namespace maman15
 
       return std::make_unique<PrivateKeyFileContent>(std::move(private_key.value()));
     }
+
+    const bool save() const
+    {
+      std::filesystem::path private_key_file_path{private_key_file_name};
+      std::ofstream file(private_key_file_path);
+      if (!file.is_open())
+      {
+        return false;
+      }
+
+      file << private_key;
+
+      return true;
+    }
   };
 } // namespace maman15
 #pragma endregion
@@ -1247,9 +1296,65 @@ namespace maman15
 
     const bool send_public_key()
     {
-      log("TODO: send public key");
+      if (!is_connected)
+      {
+        log("Client is not connected to the server. Please register first.");
+        return false;
+      }
 
-      return false;
+      PrivateKey private_key{};
+      PublicKey public_key{static_cast<std::string>(private_key)};
+
+      private_key_file_content = std::make_unique<PrivateKeyFileContent>(std::move(private_key));
+      if (!private_key_file_content)
+      {
+        log("Failed to create ", PrivateKeyFileContent::private_key_file_name, " file");
+        return false;
+      }
+      if (!private_key_file_content->save())
+      {
+        log("Failed to save ", PrivateKeyFileContent::private_key_file_name, " file");
+        return false;
+      }
+
+      if (!send_request(RequestSendPublicKey{identifier_file_content->client_id, instructions_file_content->client_name, public_key.get_raw()}, socket))
+      {
+        log("Failed to send public key request");
+        return false;
+      }
+
+      if (auto response = receive_response(socket); !response)
+      {
+        log("Failed to receive response from the server");
+        return false;
+      }
+      else
+      {
+        log("Received reponse");
+        bool public_key_sent_successfully = std::visit(
+            [&](auto &&res) -> bool {
+              using T = std::decay_t<decltype(res)>;
+              if constexpr (std::is_same_v<T, ResponseSuccessPublicKey>)
+              {
+                log("Received public key response");
+                if (res.client_id != identifier_file_content->client_id)
+                {
+                  log("Received client_id does not match the one in the identifier file");
+                  return false;
+                }
+                aes_key = std::move(res.aes_key);
+                return true;
+              }
+              else
+              {
+                log("Did not receive public key response");
+                return false;
+              }
+            },
+            response.value());
+
+        return public_key_sent_successfully;
+      }
     }
 
     const bool send_file(const std::filesystem::path &file_path)
@@ -1299,7 +1404,7 @@ namespace maman15
       else
       {
         log("Received reponse");
-        bool signed_up_successfully = std::visit(
+        is_connected = std::visit(
             [&](auto &&res) -> bool {
               using T = std::decay_t<decltype(res)>;
               if constexpr (std::is_same_v<T, ResponseSuccessSignUp>)
@@ -1326,7 +1431,7 @@ namespace maman15
             },
             response.value());
 
-        return signed_up_successfully;
+        return is_connected;
       }
     }
 
@@ -1345,10 +1450,15 @@ namespace maman15
         return false;
       }
 
-      if (auto response = receive_response(socket))
+      if (auto response = receive_response(socket); !response)
+      {
+        log("Failed to receive response from the server");
+        return false;
+      }
+      else
       {
         log("Received reponse");
-        bool signed_in_successfully = std::visit(
+        is_connected = std::visit(
             [&](auto &&res) -> bool {
               using T = std::decay_t<decltype(res)>;
               if constexpr (std::is_same_v<T, ResponseSuccessSignInAllowed>)
@@ -1370,12 +1480,7 @@ namespace maman15
             },
             response.value());
 
-        return signed_in_successfully;
-      }
-      else
-      {
-        log("Failed to receive response from the server");
-        return false;
+        return is_connected;
       }
     }
 
@@ -1389,6 +1494,8 @@ namespace maman15
     std::unique_ptr<IdentifierFileContent> identifier_file_content;
 
     std::optional<AESKey> aes_key;
+
+    bool is_connected = false;
   };
 } // namespace maman15
 
@@ -1431,6 +1538,8 @@ namespace maman15
       return {};
     }
   }
+
+  // TODO: wrap pImpl->whatever() with if (!pImpl) log and then return false;
 
   const bool Client::register_to_server()
   {
