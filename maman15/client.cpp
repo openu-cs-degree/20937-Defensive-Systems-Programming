@@ -466,6 +466,9 @@ namespace
   {
     uint32_t data;
 
+    PacketNumber(uint16_t packetNumber, uint16_t totalPackets)
+        : data((packetNumber << 16) | totalPackets){};
+
     uint16_t getPacketNumber() const
     {
       return data >> 16;
@@ -1359,9 +1362,66 @@ namespace maman15
 
     const bool send_file(const std::filesystem::path &file_path)
     {
-      log("TODO: send file ", file_path);
+      if (!is_connected)
+      {
+        log("Client is not connected to the server. Please register first.");
+        return false;
+      }
+      if (!aes_key)
+      {
+        log("AES key is not available. Please send public key first.");
+        return false;
+      }
+      if (!identifier_file_content || !private_key_file_content)
+      {
+        log("Client is corrupted. Try creating a new Client object.");
+        return false;
+      }
 
-      return false;
+      auto request = Impl::create_request_send_file(identifier_file_content->client_id, file_path);
+      if (!request)
+      {
+        log("Failed to create send-file request");
+        return false;
+      }
+
+      if (!send_request(*request, socket))
+      {
+        log("Failed to send send-file request");
+        return false;
+      }
+
+      if (auto response = receive_response(socket); !response)
+      {
+        log("Failed to receive response from the server");
+        return false;
+      }
+      else
+      {
+        log("Received reponse");
+        bool file_sent_successfully = std::visit(
+            [&](auto &&res) -> bool {
+              using T = std::decay_t<decltype(res)>;
+              if constexpr (std::is_same_v<T, ResponseSuccessMessageReceived>)
+              {
+                log("Received file response");
+                if (res.client_id != identifier_file_content->client_id)
+                {
+                  log("Received client_id does not match the one in the identifier file");
+                  return false;
+                }
+                return true;
+              }
+              else
+              {
+                log("Did not receive success response");
+                return false;
+              }
+            },
+            response.value());
+
+        return file_sent_successfully;
+      }
     }
 
     const bool validate_crc()
@@ -1482,6 +1542,44 @@ namespace maman15
 
         return is_connected;
       }
+    }
+
+    static const std::optional<RequestVariant> create_request_send_file(ClientID client_id, const std::filesystem::path &file_path)
+    {
+      if (!std::filesystem::exists(file_path))
+      {
+        log("File does not exist: ", file_path);
+        return std::nullopt;
+      }
+      if (!std::filesystem::is_regular_file(file_path))
+      {
+        log("File is not a regular file: ", file_path);
+        return std::nullopt;
+      }
+      if (std::filesystem::file_size(file_path) > static_cast<uintmax_t>(std::numeric_limits<uint32_t>::max()))
+      {
+        log("File is too large: ", file_path);
+        return std::nullopt;
+      }
+      std::ifstream file(file_path, std::ios::binary);
+      if (!file.is_open())
+      {
+        log("Failed to open file: ", file_path);
+        return std::nullopt;
+      }
+
+      std::vector<uint8_t> content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+      const uint32_t content_size = content.size();
+      const uint32_t orig_file_size = static_cast<uint32_t>(std::filesystem::file_size(file_path));
+      const PacketNumber packet_number_and_total_packets{1, 1}; // TODO: implement packetization
+      const auto filename = Filename::from_string(file_path.filename().string());
+      if (!filename)
+      {
+        log("Failed to create filename from file path: ", file_path);
+        return std::nullopt;
+      }
+
+      return RequestSendFile{client_id, content_size, orig_file_size, packet_number_and_total_packets, Filename::from_string(file_path.filename().string()).value(), std::move(content)};
     }
 
   public:
