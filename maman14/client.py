@@ -40,13 +40,13 @@ import struct
 
 VERSION = 4
 
-class Op(Enum):
+class RequestCode(Enum):
     SAVE = 100
     RESTORE = 200
     DELETE = 201
     LIST = 202
 
-class Status(Enum):
+class ResponseCode(Enum):
     SUCCESS_RESTORE = 210
     SUCCESS_LIST = 211
     SUCCESS_SAVE = 212
@@ -68,13 +68,13 @@ def validate_range(var_name: str, number: int, uint_type: Literal["uint8_t", "ui
     if not (min_val <= number <= max_val):
         raise ValueError(f"{var_name} {number} is out of range for {uint_type}.")
 
-def validate_op(op: Op) -> None:
-    if op not in Op:
-        raise ValueError(f"Invalid op: {op.value}")
+def validate_request(req: RequestCode) -> None:
+    if req not in RequestCode:
+        raise ValueError(f"Invalid reqeust code: {req.value}")
     
-def validate_status(status: Status) -> None:
-    if status not in Status:
-        raise ValueError(f"Invalid status: {status}")
+def validate_response(res: ResponseCode) -> None:
+    if res not in ResponseCode:
+        raise ValueError(f"Invalid response code: {res.value}")
 
 # common classes
     
@@ -105,28 +105,28 @@ class Payload:
 # requests
 
 class _RequestBase(ABC):
-    def __init__(self, user_id: int, version: int, op: Op):
+    def __init__(self, user_id: int, version: int, req: RequestCode):
         validate_range("user_id", user_id, "uint32_t")
         validate_range("version", version, "uint8_t")
-        validate_op(op)
+        validate_request(req)
         
         self.user_id = user_id
         self.version = version
-        self.op = op.value
+        self.req = req.value
 
     def pack(self) -> bytes:
         return struct.pack(
             f'<I B B',
             self.user_id,
             self.version,
-            self.op
+            self.req
         )
 
 Request = _RequestBase
 
 class _RequestWithFileName(_RequestBase):
-    def __init__(self, user_id: int, version: int, op: Op, filename: str):
-        super().__init__(user_id, version, op)
+    def __init__(self, user_id: int, version: int, req: RequestCode, filename: str):
+        super().__init__(user_id, version, req)
         self.filename = Filename(filename)
     
     def pack(self) -> bytes:
@@ -134,26 +134,26 @@ class _RequestWithFileName(_RequestBase):
             f'<I B B H {self.filename.name_len}s',
             self.user_id,
             self.version,
-            self.op,
+            self.req,
             self.filename.name_len,
             self.filename.filename.encode('utf-8')
         )
 
 class RequestList(_RequestBase):
     def __init__(self, user_id: int, version: int):
-        super().__init__(user_id, version, Op.LIST)
+        super().__init__(user_id, version, RequestCode.LIST)
 
 class RequestRestore(_RequestWithFileName):
     def __init__(self, user_id: int, version: int, filename: str):
-        super().__init__(user_id, version, Op.RESTORE, filename)
+        super().__init__(user_id, version, RequestCode.RESTORE, filename)
 
 class RequestDelete(_RequestWithFileName):
     def __init__(self, user_id: int, version: int, filename: str):
-        super().__init__(user_id, version, Op.DELETE, filename)
+        super().__init__(user_id, version, RequestCode.DELETE, filename)
 
 class RequestSave(_RequestWithFileName):
     def __init__(self, user_id: int, version: int, filename: str, file_content: bytes):
-        super().__init__(user_id, version, Op.SAVE, filename)
+        super().__init__(user_id, version, RequestCode.SAVE, filename)
         self.payload = Payload(len(file_content), file_content)
 
     def pack(self) -> bytes:
@@ -162,7 +162,7 @@ class RequestSave(_RequestWithFileName):
             f'<I B B H {len(filename_bytes)}s I {len(self.payload.payload)}s',
             self.user_id,
             self.version,
-            self.op,
+            self.req,
             len(filename_bytes),
             filename_bytes,
             len(self.payload.payload),
@@ -172,26 +172,26 @@ class RequestSave(_RequestWithFileName):
 # responses
     
 class _ResponseBase(ABC):
-    def __init__(self, version: int, status: Status):
+    def __init__(self, version: int, res: ResponseCode):
         self.version = version
-        self.status = status
+        self.res = res
 
     def __str__(self) -> str:
-        return f"Version: {self.version}\nStatus: {self.status}"
+        return f"Version: {self.version}\nResponse Code: {self.res}"
         
 Response = _ResponseBase
 
 class ResponseErrorGeneral(_ResponseBase):
     def __init__(self, version: int):
-        super().__init__(version, Status.ERROR_GENERAL)
+        super().__init__(version, ResponseCode.ERROR_GENERAL)
 
 class ResponseErrorNoClient(_ResponseBase):
     def __init__(self, version: int):
-        super().__init__(version, Status.ERROR_NO_CLIENT)
+        super().__init__(version, ResponseCode.ERROR_NO_CLIENT)
 
 class _ResponseWithFileName(_ResponseBase):
-    def __init__(self, version: int, status: Status, filename: Filename):
-        super().__init__(version, status)
+    def __init__(self, version: int, res: ResponseCode, filename: Filename):
+        super().__init__(version, res)
         self.filename = filename
     
     def __str__(self) -> str:
@@ -199,15 +199,15 @@ class _ResponseWithFileName(_ResponseBase):
 
 class ResponseSuccessSave(_ResponseWithFileName):
     def __init__(self, version: int, filename: Filename):
-        super().__init__(version, Status.SUCCESS_SAVE, filename)
+        super().__init__(version, ResponseCode.SUCCESS_SAVE, filename)
 
 class ResponseErrorNoFile(_ResponseWithFileName):
     def __init__(self, version: int, filename: Filename):
-        super().__init__(version, Status.ERROR_NO_FILE, filename)
+        super().__init__(version, ResponseCode.ERROR_NO_FILE, filename)
 
 class _ResponseWithFileNameAndPayload(_ResponseWithFileName):
-    def __init__(self, version: int, status: Status, filename: Filename, payload: Payload):
-        super().__init__(version, status, filename)
+    def __init__(self, version: int, res: ResponseCode, filename: Filename, payload: Payload):
+        super().__init__(version, res, filename)
         self.payload = payload
     
     def __str__(self) -> str:
@@ -215,11 +215,11 @@ class _ResponseWithFileNameAndPayload(_ResponseWithFileName):
 
 class ResponseSuccessRestore(_ResponseWithFileNameAndPayload):
     def __init__(self, version: int, filename: Filename, payload: Payload):
-        super().__init__(version, Status.SUCCESS_RESTORE, filename, payload)
+        super().__init__(version, ResponseCode.SUCCESS_RESTORE, filename, payload)
 
 class ResponseSuccessList(_ResponseWithFileNameAndPayload):
     def __init__(self, version: int, filename: Filename, payload: Payload):
-        super().__init__(version, Status.SUCCESS_LIST, filename, payload)
+        super().__init__(version, ResponseCode.SUCCESS_LIST, filename, payload)
 
     def __str__(self) -> str:
         return super().__str__() + f"\nFiles list:\n{self.payload.payload.decode('utf-8')}"
@@ -312,15 +312,15 @@ class Client:
         if len(data) < 3:
             raise Exception(f"Response too short; got {len(data)} bytes but expected at least 3")
         
-        # Unpack the version and status
-        version, status = struct.unpack('<B H', data[:3])
-        status = Status(status)
+        # Unpack the version and res
+        version, res = struct.unpack('<B H', data[:3])
+        res = ResponseCode(res)
         validate_range("version", version, "uint8_t")
-        validate_status(status)
+        validate_response(res)
 
-        if status == Status.ERROR_GENERAL:
+        if res == ResponseCode.ERROR_GENERAL:
             return ResponseErrorGeneral(version)
-        elif status == Status.ERROR_NO_CLIENT:
+        elif res == ResponseCode.ERROR_NO_CLIENT:
             return ResponseErrorNoClient(version)
         
         if len(data) < 5:
@@ -335,9 +335,9 @@ class Client:
             raise ValueError(f"filename length ({len(filename)}) does not match name_len ({name_len}).")
         filename_obj = Filename(filename)
 
-        if status == Status.SUCCESS_SAVE:
+        if res == ResponseCode.SUCCESS_SAVE:
             return ResponseSuccessSave(version, filename_obj)
-        elif status == Status.ERROR_NO_FILE:
+        elif res == ResponseCode.ERROR_NO_FILE:
             return ResponseErrorNoFile(version, filename_obj)
         
         if len(data) < filename_end + 4:
@@ -352,12 +352,12 @@ class Client:
             raise ValueError(f"payload size ({len(payload)}) does not match payload_size ({payload_size}).")
         payload_obj = Payload(payload_size, payload)
 
-        if status == Status.SUCCESS_RESTORE:
+        if res == ResponseCode.SUCCESS_RESTORE:
             return ResponseSuccessRestore(version, filename_obj, payload_obj)
-        elif status == Status.SUCCESS_LIST:
+        elif res == ResponseCode.SUCCESS_LIST:
             return ResponseSuccessList(version, filename_obj, payload_obj)
         
-        raise Exception(f"Invalid status: {status}")
+        raise Exception(f"Invalid response code: {res}")
 
 class RequestGenerator:
     def __init__(self, user_id):
@@ -389,14 +389,6 @@ def main():
 
     generator = RequestGenerator(unique_id)
     client.send_request(generator.generate_list_request()) # step 4
-    client.send_request(generator.generate_save_request(filenames[0])) # step 5
-    client.send_request(generator.generate_save_request(filenames[1])) # step 6
-    client.send_request(generator.generate_list_request()) # step 7
-    res = client.send_request(generator.generate_restore_request(filenames[0])) # step 8
-    with open(f"tmp", "wb") as f:
-        f.write(res.payload.payload)
-    client.send_request(generator.generate_delete_request(filenames[0])) # step 9
-    client.send_request(generator.generate_restore_request(filenames[0])) # step 10
 
 if __name__ == "__main__":
     main()
