@@ -47,6 +47,8 @@ import struct
 import base64
 import time
 import os
+from Crypto.PublicKey import RSA
+from Crypto.Cipher import AES, PKCS1_OAEP
 from Crypto.Hash import SHA256
 
 VERSION = 4
@@ -826,7 +828,10 @@ class Client:
         self.sock = client_sock
         self.db = user_db
         self.last_active_time = time.time()
-        self.client_id = bytes(16)
+        self.client_id = bytes(CLIENT_ID_LEN)
+        self.aes_key = bytes(AES_KEY_SIZE)
+        self.username = ""
+        self.filename = ""
         self.awaiting_file = False
         self.active = True
 
@@ -841,13 +846,13 @@ class Client:
             request = RequestMessage(buffer)
             match request.code:
                 case RequestCode.SIGN_UP:
-                    self._handle_registration(request)
+                    self._sign_up(request)
                 case RequestCode.SEND_PUBLIC_KEY:
-                    self._handle_public_key(request)
+                    self._send_public_key(request)
                 case RequestCode.SIGN_IN:
-                    self._handle_login(request)
+                    self._sign_in(request)
                 case RequestCode.SEND_FILE:
-                    self._handle_file(request)
+                    self._send_file(request)
                 case RequestCode.CRC_VALID:
                     self._handle_valid_crc(request)
                 case RequestCode.CRC_INVALID:
@@ -856,74 +861,73 @@ class Client:
                     self._handle_terminate(request)
                 case _:
                     raise ValueError(f"Invalid request code {request.code}")
-        except Exception as e:
+        except RuntimeError as e:
             print(
                 f"failed to handle request with error: {str(e)}\nfrom client: {self.client_id}"
             )
             self._send_generic_failure()
 
     @staticmethod
-    def _get_string_from_bytes(b: bytes) -> str:
+    def _bytes_to_string(b: bytes) -> str:
         return str(b.split(bytes([ord("\0")]))[0], "utf-8")
 
-    def _handle_registration(self, request):
+    def _sign_up(self, request):
         if self.awaiting_file:
-            raise Exception("got registration message in file phase")
+            raise RuntimeError("got registration message in file phase")
         if request.payload_size != MAX_USER_NAME_LEN:
-            raise Exception("wrong payload size in registration")
+            raise RuntimeError("wrong payload size in registration")
 
-        username = Client._get_string_from_bytes(request.payload)
-        if self.db.get_client_by_name(username):
-            return self._send_registration_failed()
+        username = Client._bytes_to_string(request.payload)
+
         self.db.create_new_client(username)
         self.username = username
         self.client_id = self.db.get_client_by_name(username)[0]
         self._send_registration_successful()
 
-    def _handle_public_key(self, request):
+    def _send_public_key(self, request):
         if self.awaiting_file:
-            raise Exception("got public key message in file phase")
+            raise RuntimeError("got public key message in file phase")
         if request.payload_size != MAX_USER_NAME_LEN + PUBLIC_KEY_SIZE:
-            raise Exception("wrong payload size in public key")
+            raise RuntimeError("wrong payload size in public key")
 
-        username = Client._get_string_from_bytes(request.payload[:MAX_USER_NAME_LEN])
+        username = Client._bytes_to_string(request.payload[:MAX_USER_NAME_LEN])
         public_key = request.payload[MAX_USER_NAME_LEN:]
         if self.client_id != request.client_id or self.username != username:
-            raise Exception("client_id or username not matching")
+            raise RuntimeError("client_id or username not matching")
 
         self.db.update_public_key(self.client_id, public_key)
         self._send_public_key_received(public_key)
         self.awaiting_file = True
 
-    def _handle_login(self, request):
+    def _sign_in(self, request):
         if self.awaiting_file:
-            raise Exception("got login message in file phase")
+            raise RuntimeError("got login message in file phase")
         if request.payload_size != MAX_USER_NAME_LEN:
-            raise Exception("wrong payload size in login")
+            raise RuntimeError("wrong payload size in login")
         client_row = self.db.get_client_by_id(request.client_id)
         if not client_row or not client_row[2]:
             return self._send_login_failed()
-        username = Client._get_string_from_bytes(request.payload[:MAX_USER_NAME_LEN])
+        username = Client._bytes_to_string(request.payload[:MAX_USER_NAME_LEN])
         if username != client_row[1]:
-            raise Exception("client_id or username not matching")
+            raise RuntimeError("client_id or username not matching")
 
         self.client_id = request.client_id
         self.username = username
         self._send_login_successful(client_row[2])
         self.awaiting_file = True
 
-    def _handle_file(self, request):
+    def _send_file(self, request):
         if not self.awaiting_file:
-            raise Exception("got file message in login phase")
+            raise RuntimeError("got file message in login phase")
         if self.client_id != request.client_id:
-            raise Exception("client_id not matching")
+            raise RuntimeError("client_id not matching")
         if request.payload_size <= 4 + MAX_FILE_NAME_LEN:
-            raise Exception("file message has no file content")
+            raise RuntimeError("file message has no file content")
         (content_size,) = struct.unpack("<I", request.payload[:4])
         padded_content_size = (content_size // AES_KEY_SIZE) * AES_KEY_SIZE
         if content_size % AES_KEY_SIZE != 0:
             padded_content_size += AES_KEY_SIZE
-        self.filename = Client._get_string_from_bytes(
+        self.filename = Client._bytes_to_string(
             request.payload[4 : MAX_FILE_NAME_LEN + 4]
         )
         encrypted_file = request.payload[
@@ -935,37 +939,37 @@ class Client:
 
     def _handle_valid_crc(self, request):
         if self.awaiting_file:
-            raise Exception("got valid crc message while waiting for file")
+            raise RuntimeError("got valid crc message while waiting for file")
         if self.client_id != request.client_id:
-            raise Exception("client_id not matching")
+            raise RuntimeError("client_id not matching")
         if request.payload_size != MAX_FILE_NAME_LEN:
-            raise Exception("wrong payload size in valid crc")
-        filename = Client._get_string_from_bytes(request.payload)
+            raise RuntimeError("wrong payload size in valid crc")
+        filename = Client._bytes_to_string(request.payload)
         if filename != self.filename:
-            raise Exception("filename not matching")
+            raise RuntimeError("filename not matching")
         self.db.set_file_to_valid(self.client_id)
         self._send_generic_ack()
 
     def _handle_invalid_crc(self, request):
         if self.client_id != request.client_id:
-            raise Exception("client_id not matching")
+            raise RuntimeError("client_id not matching")
         if request.payload_size != MAX_FILE_NAME_LEN:
-            raise Exception("wrong payload size in invalid crc")
-        filename = Client._get_string_from_bytes(request.payload)
+            raise RuntimeError("wrong payload size in invalid crc")
+        filename = Client._bytes_to_string(request.payload)
         if filename != self.filename:
-            raise Exception("filename not matching")
+            raise RuntimeError("filename not matching")
         self.awaiting_file = True
 
     def _handle_terminate(self, request):
         if not self.awaiting_file:
-            raise Exception("got terminate message in login phase")
+            raise RuntimeError("got terminate message in login phase")
         if self.client_id != request.client_id:
-            raise Exception("client_id not matching")
+            raise RuntimeError("client_id not matching")
         if request.payload_size != MAX_FILE_NAME_LEN:
-            raise Exception("wrong payload size in terminate")
-        filename = Client._get_string_from_bytes(request.payload)
+            raise RuntimeError("wrong payload size in terminate")
+        filename = Client._bytes_to_string(request.payload)
         if filename != self.filename:
-            raise Exception("filename not matching")
+            raise RuntimeError("filename not matching")
         self._send_generic_ack()
         self.active = False
 
@@ -1006,7 +1010,7 @@ class Client:
         self.sock.send(response.serialize())
 
     def _get_encrypted_aes_key(self, public_key):
-        self.aes_key = urandom(AES_KEY_SIZE)
+        self.aes_key = os.urandom(AES_KEY_SIZE)
         self.db.update_aes_key(self.client_id, self.aes_key)
 
         rsa_key = RSA.import_key(public_key)
@@ -1021,7 +1025,7 @@ class Client:
                 encrypted_file[i * AES_KEY_SIZE : (i + 1) * AES_KEY_SIZE]
             )
         if len(file_content) < content_size:
-            raise Exception("something went wrong decrypting the file")
+            raise RuntimeError("something went wrong decrypting the file")
         file_content = file_content[:content_size]
         self.db.insert_unvalidated_file(self.filename, file_content, self.client_id)
         return memcrc(file_content)
