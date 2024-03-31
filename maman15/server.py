@@ -39,12 +39,28 @@ Copyright: All rights reserved (c) Yehonatan Simian 2024
 from typing import Tuple, List, Literal
 from enum import Enum
 from abc import ABC
+import sqlite3
 import random
 import socket
 import string
 import struct
+import base64
+import time
+import os
+from Crypto.Hash import SHA256
 
 VERSION = 4
+
+CLIENT_ID_LEN = 16
+PUBLIC_KEY_SIZE = 160
+AES_KEY_SIZE = 16
+ENCRYPTED_AES_KEY_SIZE = 128
+MAX_USER_NAME_LEN = 255
+MAX_FILE_NAME_LEN = 255
+
+REQUEST_MIN_LEN = 23
+MAX_FILE_CONTENT_LENGTH = 0xFFFFFFFF
+MAX_REQUEST_LENGTH = REQUEST_MIN_LEN + MAX_FILE_NAME_LEN + 4 + MAX_FILE_CONTENT_LENGTH
 
 
 class RequestCode(Enum):
@@ -116,6 +132,28 @@ class ClientID:
         self.lower = lower
 
 
+class ClientName:
+    """A class to represent a client name."""
+
+    def __init__(self, name: str):
+        validate_range("name_len", len(name), "uint8_t")
+        self.validate_name(name)
+        self.name_len = len(name)
+        self.name = name
+
+    @staticmethod
+    def validate_name(name: str) -> None:
+        """Validate that a name is valid."""
+        # Check for directory traversal characters
+        if ".." in name or "/" in name or "\\" in name:
+            raise ValueError("Invalid characters in name")
+
+        # Check for invalid characters
+        valid_chars = f"-_.() {string.ascii_letters}{string.digits}"
+        if any(char not in valid_chars for char in name):
+            raise ValueError("Invalid characters in name")
+
+
 class Filename:
     """A class to represent a filename."""
 
@@ -150,82 +188,51 @@ class Payload:
 # requests
 
 
-class _RequestBase(ABC):
-    # const ClientID client_id;
-    # const uint8_t version;
-    # const RequestCode code;
-    # const uint32_t payload_size;
-    def __init__(self, client_id: ClientID, version: int, req: RequestCode):
-        validate_range("client_id", client_id.upper, "uint64_t")
-        validate_range("version", version, "uint8_t")
-        validate_request(req)
-
-        self.client_id = client_id
-        self.version = version
-        self.req = req.value
-
-    def pack(self) -> bytes:
-        """Pack the request into a byte string."""
-        return struct.pack("<I B B", self.client_id, self.version, self.req)
-
-
-Request = _RequestBase
-
-
-# class _RequestWithFileName(_RequestBase):
+# class _RequestBase(ABC):
 #     def __init__(
-#         self, client_id: ClientID, version: int, req: RequestCode, filename: str
+#         self, client_id: ClientID, version: int, req: RequestCode, payload_size: int
 #     ):
-#         super().__init__(client_id, version, req)
-#         self.filename = Filename(filename)
+#         validate_range("version", version, "uint8_t")
+#         validate_range("payload_size", payload_size, "uint32_t")
+#         validate_request(req)
+
+#         self.client_id = client_id
+#         self.version = version
+#         self.req = req.value
+#         self.payload_size = payload_size
 
 #     def pack(self) -> bytes:
+#         """Pack the request into a byte string."""
 #         return struct.pack(
-#             f"<I B B H {self.filename.name_len}s",
-#             self.client_id,
+#             "<Q Q B H I",
+#             self.client_id.upper,
+#             self.client_id.lower,
 #             self.version,
 #             self.req,
-#             self.filename.name_len,
-#             self.filename.filename.encode("utf-8"),
+#             self.payload_size,
 #         )
 
-# SIGN_UP = 1025
-# SEND_PUBLIC_KEY = 1026
-# SIGN_IN = 1027
-# SEND_FILE = 1028
-# CRC_VALID = 1029
-# CRC_INVALID = 1030
-# CRC_INVALID_4TH_TIME = 1031
 
+class RequestMessage:
+    """A class to represent a request message."""
 
-class RequestSignUp(_RequestBase):
-    """A request to sign up a new client."""
-
-    def __init__(self, client_id: ClientID, version: int):
-        super().__init__(client_id, version, RequestCode.SIGN_UP)
-
-
-# class RequestSave(_RequestBase):
-#     """A request to save a file."""
-
-#     def __init__(
-#         self, client_id: ClientID, version: int, filename: str, file_content: bytes
-#     ):
-#         super().__init__(client_id, version, RequestCode.SAVE, filename)
-#         self.payload = Payload(len(file_content), file_content)
-
-#     def pack(self) -> bytes:
-#         filename_bytes = self.filename.filename.encode("utf-8")
-#         return struct.pack(
-#             f"<I B B H {len(filename_bytes)}s I {len(self.payload.payload)}s",
-#             self.client_id,
-#             self.version,
-#             self.req,
-#             len(filename_bytes),
-#             filename_bytes,
-#             len(self.payload.payload),
-#             self.payload.payload,
-#         )
+    def __init__(self, buffer: bytes):
+        if len(buffer) < REQUEST_MIN_LEN:
+            raise ValueError(
+                f"Invalid request length {len(buffer)} < {REQUEST_MIN_LEN}"
+            )
+        self.client_id = buffer[:CLIENT_ID_LEN]
+        buffer = buffer[CLIENT_ID_LEN:]
+        header_remaining_len = 7
+        self.version, self.code, self.payload_size = struct.unpack(
+            "<BHI", buffer[:header_remaining_len]
+        )
+        buffer = buffer[header_remaining_len:]
+        if len(buffer) != self.payload_size:
+            raise ValueError(
+                f"Invalid payload length {len(buffer)} != {self.payload_size}"
+            )
+        self.payload = buffer
 
 
 # responses
@@ -312,6 +319,147 @@ class ResponseSuccessList(_ResponseWithFileNameAndPayload):
         )
 
 
+# Database Management
+
+
+class DatabaseManager:
+    """A class to manage the database."""
+
+    CLIENTS_TABLE = "clients"
+    TEMP_FILE_PATH = "saved"
+    FILES_TABLE = "files"
+
+    def __init__(self, conn: sqlite3.Connection):
+        self.conn = conn
+        self._create_tables()
+
+    def create_new_client(self, username: str) -> None:
+        """Create a new client in the database."""
+        self._validate_username(username)
+        client_id = os.urandom(CLIENT_ID_LEN)
+        cursor = self.conn.cursor()
+        cursor.execute(
+            f"INSERT INTO {self.CLIENTS_TABLE} (id, name, public_key, last_seen, aes_key) VALUES (?, ?, ?, ?, ?);",
+            (client_id, username, bytes(0), time.asctime(), bytes(0)),
+        )
+        self.conn.commit()
+        cursor.close()
+
+    def get_client_by_name(self, username: str):
+        """Get a client by their username."""
+        self._validate_username(username)
+
+        cursor = self.conn.cursor()
+        cursor.execute(
+            f"SELECT * FROM {self.CLIENTS_TABLE} WHERE name = ?;", (username,)
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        if not rows:
+            return []
+        return rows[0]
+
+    def get_client_by_id(self, client_id):
+        """Get a client by their ID."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            f"SELECT * FROM {self.CLIENTS_TABLE} WHERE id = ?;", (client_id,)
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        if not rows:
+            return []
+        return rows[0]
+
+    def update_public_key(self, client_id, public_key):
+        """Update a client's public key."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            f"UPDATE {self.CLIENTS_TABLE} SET public_key = ? WHERE id = ?;",
+            (public_key, client_id),
+        )
+        self.conn.commit()
+        cursor.close()
+
+    def update_aes_key(self, client_id, aes_key):
+        """Update a client's AES key."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            f"UPDATE {self.CLIENTS_TABLE} SET aes_key = ? WHERE id = ?;",
+            (aes_key, client_id),
+        )
+        self.conn.commit()
+        cursor.close()
+
+    def insert_unvalidated_file(self, filename: str, file_content, file_id):
+        """Insert a file into the database."""
+        self._validate_filename(filename)
+
+        if not os.path.exists(self.TEMP_FILE_PATH):
+            os.mkdir(self.TEMP_FILE_PATH)
+        file_path = self._id_to_path(file_id, filename)
+        with open(file_path, "wb") as f:
+            f.write(file_content)
+
+        cursor = self.conn.cursor()
+        cursor.execute(
+            f"INSERT INTO {self.FILES_TABLE} (id, file_name, saved_path, verified) VALUES (?, ?, ?, ?);",
+            (file_id, filename, file_path, 0),
+        )
+        self.conn.commit()
+        cursor.close()
+
+    def set_file_to_valid(self, file_id):
+        """Set a file to be valid."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            f"UPDATE {self.FILES_TABLE} SET verified = ? WHERE file_name = ?;",
+            (1, file_id),
+        )
+        self.conn.commit()
+        cursor.close()
+
+    def _create_tables(self):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            f"""CREATE TABLE IF NOT EXISTS {self.CLIENTS_TABLE} (
+                    id BLOB PRIMARY KEY,
+                    name TEXT,
+                    public_key BLOB,
+                    last_seen TEXT,
+                    aes_key BLOB
+                )"""
+        )
+        cursor.execute(
+            f"""CREATE TABLE IF NOT EXISTS {self.FILES_TABLE} (
+                    id BLOB,
+                    file_name TEXT,
+                    saved_path TEXT,
+                    verified INTEGER
+                )"""
+        )
+        cursor.close()
+
+    def _validate_username(self, username: str) -> None:
+        for ch in username:
+            if not ch.isalpha() and ch != " ":
+                raise ValueError("Invalid username.")
+
+    def _validate_filename(self, username: str) -> None:
+        for ch in username:
+            if not ch.isalnum() and ch != " " and ch != "." and ch != "/":
+                raise ValueError("Invalid filename.")
+
+    def _id_to_path(self, file_id, filename):
+        return (
+            self.TEMP_FILE_PATH
+            + "/"
+            + str(base64.b32encode(file_id), "utf-8")
+            + SHA256.new(bytes(filename, "utf-8")).hexdigest()
+            + ".tmp"
+        )
+
+
 class FileHandler:
     """A class to handle reading server and backup information from files."""
 
@@ -376,100 +524,220 @@ class UniqueIDGenerator:
 
 
 class Client:
-    """A class to represent a client that can send requests to a server."""
+    """A class to represent a client."""
 
-    def __init__(self, ip_address: str, port: int):
-        self.ip_address = ip_address
-        self.port = port
+    def __init__(self, client_sock: socket.socket, user_db: DatabaseManager):
+        self.sock = client_sock
+        self.db = user_db
+        self.last_active_time = time.time()
+        self.client_id = bytes(16)
+        self.awaiting_file = False
+        self.active = True
 
-    def send_request(self, request: Request) -> Response:
-        """Send a request to the server and return the response."""
-        # send request
-        my_socket = socket.socket(
-            socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP
+    def handle_message(self):
+        """Handle a message from the client."""
+        if not self.active:
+            raise RuntimeError(f"got message on inactive client {self.client_id}")
+
+        self.last_active_time = time.time()
+        try:
+            request_buffer = self.sock.recv(MAX_REQUEST_LENGTH)
+            request = RequestMessage(request_buffer)
+            print(f"handling message code {request.code}")
+            match request.code:
+                case 0x401:
+                    self._handle_registration(request)
+                case 0x402:
+                    self._handle_public_key(request)
+                case 0x403:
+                    self._handle_login(request)
+                case 0x404:
+                    self._handle_file(request)
+                case 0x405:
+                    self._handle_valid_crc(request)
+                case 0x406:
+                    self._handle_invalid_crc(request)
+                case 0x407:
+                    self._handle_terminate(request)
+                case _:
+                    raise Exception(f"got invalid message code {request.code}")
+        except Exception as e:
+            # we don't want one rogue client to terminate the whole server
+            print(
+                f"failed to handle message with error: {str(e)}\nfrom client: {self.client_id}"
+            )
+            self._send_generic_failure()
+
+    _get_string_from_bytes = lambda b: str(b.split(bytes([ord("\0")]))[0], "utf-8")
+
+    def _handle_registration(self, request):
+        if self.awaiting_file:
+            raise Exception("got registration message in file phase")
+        if request.payload_size != common.MAX_USER_NAME_LEN:
+            raise Exception("wrong payload size in registration")
+
+        username = ClientHandler._get_string_from_bytes(request.payload)
+        if self.db.get_client_by_name(username):
+            return self._send_registration_failed()
+        self.db.create_new_client(username)
+        self.username = username
+        self.client_id = self.db.get_client_by_name(username)[0]
+        self._send_registration_successful()
+
+    def _handle_public_key(self, request):
+        if self.awaiting_file:
+            raise Exception("got public key message in file phase")
+        if request.payload_size != common.MAX_USER_NAME_LEN + common.PUBLIC_KEY_SIZE:
+            raise Exception("wrong payload size in public key")
+
+        username = ClientHandler._get_string_from_bytes(
+            request.payload[: common.MAX_USER_NAME_LEN]
         )
-        my_socket.connect((self.ip_address, self.port))
-        my_socket.send(request.pack())
+        public_key = request.payload[common.MAX_USER_NAME_LEN :]
+        if self.client_id != request.client_id or self.username != username:
+            raise Exception("client_id or username not matching")
 
-        # receive response
-        data = b""
-        while True:
-            part = my_socket.recv(1024)
-            if not part:
-                break
-            data += part
-        response = self.unpack_response(data)
+        self.db.update_public_key(self.client_id, public_key)
+        self._send_public_key_received(public_key)
+        self.awaiting_file = True
 
-        # bye
-        self.handle_response(response)
-        my_socket.close()
-        return response
+    def _handle_login(self, request):
+        if self.awaiting_file:
+            raise Exception("got login message in file phase")
+        if request.payload_size != common.MAX_USER_NAME_LEN:
+            raise Exception("wrong payload size in login")
+        client_row = self.db.get_client_by_id(request.client_id)
+        if not client_row or not client_row[2]:
+            return self._send_login_failed()
+        username = ClientHandler._get_string_from_bytes(
+            request.payload[: common.MAX_USER_NAME_LEN]
+        )
+        if username != client_row[1]:
+            raise Exception("client_id or username not matching")
 
-    def handle_response(self, response: Response) -> None:
-        """Handle the response from the server."""
-        print(response, "\n")
+        self.client_id = request.client_id
+        self.username = username
+        self._send_login_successful(client_row[2])
+        self.awaiting_file = True
 
-    def unpack_response(self, data: bytes) -> Response:
-        """Unpack the response from the server."""
-        if len(data) < 3:
-            raise RuntimeError(
-                f"Response too short; got {len(data)} bytes but expected at least 3"
+    def _handle_file(self, request):
+        if not self.awaiting_file:
+            raise Exception("got file message in login phase")
+        if self.client_id != request.client_id:
+            raise Exception("client_id not matching")
+        if request.payload_size <= 4 + common.MAX_FILE_NAME_LEN:
+            raise Exception("file message has no file content")
+        (content_size,) = struct.unpack("<I", request.payload[:4])
+        padded_content_size = (
+            content_size // common.AES_KEY_SIZE
+        ) * common.AES_KEY_SIZE
+        if content_size % common.AES_KEY_SIZE != 0:
+            padded_content_size += common.AES_KEY_SIZE
+        self.filename = ClientHandler._get_string_from_bytes(
+            request.payload[4 : common.MAX_FILE_NAME_LEN + 4]
+        )
+        encrypted_file = request.payload[
+            common.MAX_FILE_NAME_LEN
+            + 4 : common.MAX_FILE_NAME_LEN
+            + 4
+            + padded_content_size
+        ]
+        file_crc = self._decrypt_and_save_file(encrypted_file, content_size)
+        self._send_file_received(content_size, file_crc)
+        self.awaiting_file = False
+
+    def _handle_valid_crc(self, request):
+        if self.awaiting_file:
+            raise Exception("got valid crc message while waiting for file")
+        if self.client_id != request.client_id:
+            raise Exception("client_id not matching")
+        if request.payload_size != common.MAX_FILE_NAME_LEN:
+            raise Exception("wrong payload size in valid crc")
+        filename = ClientHandler._get_string_from_bytes(request.payload)
+        if filename != self.filename:
+            raise Exception("filename not matching")
+        self.db.set_file_to_valid(self.client_id)
+        self._send_generic_ack()
+
+    def _handle_invalid_crc(self, request):
+        if self.client_id != request.client_id:
+            raise Exception("client_id not matching")
+        if request.payload_size != common.MAX_FILE_NAME_LEN:
+            raise Exception("wrong payload size in invalid crc")
+        filename = ClientHandler._get_string_from_bytes(request.payload)
+        if filename != self.filename:
+            raise Exception("filename not matching")
+        self.awaiting_file = True
+
+    def _handle_terminate(self, request):
+        if not self.awaiting_file:
+            raise Exception("got terminate message in login phase")
+        if self.client_id != request.client_id:
+            raise Exception("client_id not matching")
+        if request.payload_size != common.MAX_FILE_NAME_LEN:
+            raise Exception("wrong payload size in terminate")
+        filename = ClientHandler._get_string_from_bytes(request.payload)
+        if filename != self.filename:
+            raise Exception("filename not matching")
+        self._send_generic_ack()
+        self.active = False
+
+    def _send_registration_successful(self):
+        response = responses.RegistrationSuccessful(self.client_id)
+        self.sock.send(response.serialize())
+
+    def _send_registration_failed(self):
+        response = responses.RegistrationFailed()
+        self.sock.send(response.serialize())
+
+    def _send_public_key_received(self, public_key):
+        enc_aes_key = self._get_encrypted_aes_key(public_key)
+        response = responses.PublicKeyReceived(self.client_id, enc_aes_key)
+        self.sock.send(response.serialize())
+
+    def _send_file_received(self, content_size, file_crc):
+        response = responses.FileReceived(
+            self.client_id, content_size, self.filename, file_crc
+        )
+        self.sock.send(response.serialize())
+
+    def _send_generic_ack(self):
+        response = responses.GenericAck(self.client_id)
+        self.sock.send(response.serialize())
+
+    def _send_login_successful(self, public_key):
+        enc_aes_key = self._get_encrypted_aes_key(public_key)
+        response = responses.LoginSuccessful(self.client_id, enc_aes_key)
+        self.sock.send(response.serialize())
+
+    def _send_login_failed(self):
+        response = responses.LoginFailed(self.client_id)
+        self.sock.send(response.serialize())
+
+    def _send_generic_failure(self):
+        response = responses.GenericFailure()
+        self.sock.send(response.serialize())
+
+    def _get_encrypted_aes_key(self, public_key):
+        self.aes_key = urandom(common.AES_KEY_SIZE)
+        self.db.update_aes_key(self.client_id, self.aes_key)
+
+        rsa_key = RSA.import_key(public_key)
+        rsa = PKCS1_OAEP.new(rsa_key)
+        return rsa.encrypt(self.aes_key)
+
+    def _decrypt_and_save_file(self, encrypted_file, content_size):
+        file_content = bytes()
+        for i in range(len(encrypted_file) // common.AES_KEY_SIZE):
+            aes = AES.new(self.aes_key, mode=AES.MODE_CBC, IV=bytes(16))
+            file_content += aes.decrypt(
+                encrypted_file[i * common.AES_KEY_SIZE : (i + 1) * common.AES_KEY_SIZE]
             )
-
-        # Unpack the version and res
-        version, res = struct.unpack("<B H", data[:3])
-        res = ResponseCode(res)
-        validate_range("version", version, "uint8_t")
-        validate_response(res)
-
-        if res == ResponseCode.ERROR_GENERAL:
-            return ResponseErrorGeneral(version)
-        if res == ResponseCode.ERROR_NO_CLIENT:
-            return ResponseErrorNoClient(version)
-
-        if len(data) < 5:
-            raise RuntimeError(
-                f"Response too short; got {len(data)} bytes but expected at least 5"
-            )
-
-        # Unpack the name_len and filename
-        name_len = struct.unpack("<H", data[3:5])[0]
-        filename_start = 5
-        filename_end = filename_start + name_len
-        filename = data[filename_start:filename_end].decode("ascii")
-        if len(filename) != name_len:
-            raise ValueError(
-                f"filename length ({len(filename)}) does not match name_len ({name_len})."
-            )
-        filename_obj = Filename(filename)
-
-        if res == ResponseCode.SUCCESS_SAVE:
-            return ResponseSuccessSave(version, filename_obj)
-        if res == ResponseCode.ERROR_NO_FILE:
-            return ResponseErrorNoFile(version, filename_obj)
-
-        payload_start = filename_end + 4
-        if len(data) < payload_start:
-            raise RuntimeError(
-                f"Response too short; got {len(data)} bytes but expected at least {payload_start}"
-            )
-
-        # Unpack the payload
-        payload_size = struct.unpack("<I", data[filename_end:payload_start])[0]
-        payload_end = payload_start + payload_size
-        payload = data[payload_start:payload_end]
-        if len(payload) != payload_size:
-            raise ValueError(
-                f"payload size ({len(payload)}) does not match payload_size ({payload_size})."
-            )
-        payload_obj = Payload(payload_size, payload)
-
-        if res == ResponseCode.SUCCESS_RESTORE:
-            return ResponseSuccessRestore(version, filename_obj, payload_obj)
-        elif res == ResponseCode.SUCCESS_LIST:
-            return ResponseSuccessList(version, filename_obj, payload_obj)
-
-        raise ValueError(f"Invalid response code: {res}")
+        if len(file_content) < content_size:
+            raise Exception("something went wrong decrypting the file")
+        file_content = file_content[:content_size]
+        self.db.insert_unvalidated_file(self.filename, file_content, self.client_id)
+        return memcrc(file_content)
 
 
 class RequestGenerator:
