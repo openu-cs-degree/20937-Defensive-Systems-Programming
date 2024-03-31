@@ -36,12 +36,11 @@ The server can respond with the following statuses:
 Copyright: All rights reserved (c) Yehonatan Simian 2024
 """
 
-from typing import Tuple, List, Literal
+from typing import Literal
 from enum import Enum
+import selectors
 import sqlite3
-import random
 import socket
-import string
 import struct
 import base64
 import time
@@ -50,7 +49,9 @@ from Crypto.PublicKey import RSA
 from Crypto.Cipher import AES, PKCS1_OAEP
 from Crypto.Hash import SHA256
 
-VERSION = 4
+VERSION = 3
+DEFAULT_PORT = 1256
+PORT_FILE = "port.info"
 
 
 # CRC-32 implementation
@@ -315,7 +316,10 @@ crctab = [
     0xB1F740B4,
 ]
 
-UNSIGNED = lambda n: n & 0xFFFFFFFF
+
+def unsigned(n):
+    """Return the unsigned value of n."""
+    return n & 0xFFFFFFFF
 
 
 def memcrc(b):
@@ -324,13 +328,13 @@ def memcrc(b):
     c = s = 0
     for ch in b:
         tabidx = (s >> 24) ^ ch
-        s = UNSIGNED((s << 8)) ^ crctab[tabidx]
+        s = unsigned((s << 8)) ^ crctab[tabidx]
 
     while n:
         c = n & 0o377
         n = n >> 8
-        s = UNSIGNED(s << 8) ^ crctab[(s >> 24) ^ c]
-    return UNSIGNED(~s)
+        s = unsigned(s << 8) ^ crctab[(s >> 24) ^ c]
+    return unsigned(~s)
 
 
 def calculate_crc(fname):
@@ -385,9 +389,6 @@ class ResponseCode(Enum):
     GENERAL_ERROR = 1607
 
 
-# validations
-
-
 def validate_range(
     var_name: str,
     number: int,
@@ -418,75 +419,6 @@ def validate_response_code(code: ResponseCode) -> None:
         raise ValueError(f"Invalid response code: {code.value}")
 
 
-# common classes
-
-
-class ClientID:
-    """A class to represent a client ID."""
-
-    def __init__(self, upper: int, lower: int):
-        validate_range("upper", upper, "uint64_t")
-        validate_range("lower", lower, "uint64_t")
-        self.upper = upper
-        self.lower = lower
-
-
-class ClientName:
-    """A class to represent a client name."""
-
-    def __init__(self, name: str):
-        validate_range("name_len", len(name), "uint8_t")
-        self.validate_name(name)
-        self.name_len = len(name)
-        self.name = name
-
-    @staticmethod
-    def validate_name(name: str) -> None:
-        """Validate that a name is valid."""
-        # Check for directory traversal characters
-        if ".." in name or "/" in name or "\\" in name:
-            raise ValueError("Invalid characters in name")
-
-        # Check for invalid characters
-        valid_chars = f"-_.() {string.ascii_letters}{string.digits}"
-        if any(char not in valid_chars for char in name):
-            raise ValueError("Invalid characters in name")
-
-
-class Filename:
-    """A class to represent a filename."""
-
-    def __init__(self, filename: str):
-        validate_range("name_len", len(filename), "uint16_t")
-        self.validate_filename(filename)
-        self.name_len = len(filename)
-        self.filename = filename
-
-    @staticmethod
-    def validate_filename(filename: str) -> None:
-        """Validate that a filename is valid."""
-        # Check for directory traversal characters
-        if ".." in filename or "/" in filename or "\\" in filename:
-            raise ValueError("Invalid characters in filename")
-
-        # Check for invalid characters
-        valid_chars = f"-_.() {string.ascii_letters}{string.digits}"
-        if any(char not in valid_chars for char in filename):
-            raise ValueError("Invalid characters in filename")
-
-
-class Payload:
-    """A class to represent a payload."""
-
-    def __init__(self, size: int, payload: bytes):
-        validate_range("payload.size", size, "uint32_t")
-        self.size = size
-        self.payload = payload
-
-
-# requests
-
-
 class Request:
     """A class to represent a request from the client to the server"""
 
@@ -513,9 +445,6 @@ class Request:
         self.payload = buffer
 
 
-# responses
-
-
 class Response:
     """Base class for all responses"""
 
@@ -523,6 +452,9 @@ class Response:
         self.version = VERSION
         self.code = code
         self.payload_size = payload_size
+
+        validate_response_code(self.code)
+        validate_range("payload_size", self.payload_size, "uint32_t")
 
     def pack(self) -> bytes:
         """pack the response into bytes"""
@@ -657,12 +589,13 @@ class ResponseGeneralError(Response):
 class DatabaseManager:
     """A class to manage the database."""
 
+    DB_FILE_NAME = "server.db"
     CLIENTS_TABLE = "clients"
     TEMP_FILE_PATH = "saved"
     FILES_TABLE = "files"
 
-    def __init__(self, conn: sqlite3.Connection):
-        self.conn = conn
+    def __init__(self):
+        self.conn = sqlite3.connect(self.DB_FILE_NAME)
         self._create_tables()
 
     def create_new_client(self, username: str) -> None:
@@ -791,74 +724,10 @@ class DatabaseManager:
             + ".tmp"
         )
 
+# Server implementation
 
-# TODO: delete?
-class FileHandler:
-    """A class to handle reading server and backup information from files."""
-
-    SERVER_INFO_FILE = "server.info"
-    BACKUP_INFO_FILE = "backup.info"
-
-    def __init__(self):
-        self.server_info_file = self.SERVER_INFO_FILE
-        self.backup_info_file = self.BACKUP_INFO_FILE
-
-    @staticmethod
-    def validate_ip(ip: str) -> None:
-        """Validate that an IP address is valid."""
-        try:
-            socket.inet_aton(ip)
-        except socket.error as exc:
-            raise ValueError("Invalid IP address.") from exc
-
-    @staticmethod
-    def validate_port(port: str) -> None:
-        """Validate that a port number is valid."""
-        if not 0 <= int(port) <= 65535:
-            raise ValueError("Invalid port number.")
-
-    def read_server_info(self) -> Tuple[str, int]:
-        """Read the server information from the server.info file."""
-        try:
-            with open(self.server_info_file, mode="r", encoding="utf-8") as file:
-                ip_address, port = file.readline().strip().split(":")
-                self.validate_ip(ip_address)
-                self.validate_port(port)
-                port = int(port)
-        except FileNotFoundError as exc:
-            raise FileNotFoundError(f"{self.server_info_file} file not found.") from exc
-        return ip_address, port
-
-    def read_backup_info(self) -> List[str]:
-        """Read the backup information from the backup.info file."""
-        try:
-            with open(self.backup_info_file, mode="r", encoding="utf-8") as file:
-                filenames = [line.strip() for line in file]
-        except FileNotFoundError as exc:
-            raise FileNotFoundError(f"{self.backup_info_file} file not found.") from exc
-        if len(filenames) < 2:
-            raise RuntimeError("At least two files are required to run the client.")
-        return filenames
-
-
-# TODO: delete?
-class UniqueIDGenerator:
-    """A class to generate unique IDs."""
-
-    def __init__(self):
-        self.generated_ids = set()
-
-    def generate_unique_id(self) -> int:
-        """Generate a unique ID."""
-        while True:
-            unique_id = random.randint(0, 0xFFFFFFFF)
-            if unique_id not in self.generated_ids:
-                self.generated_ids.add(unique_id)
-                return unique_id
-
-
-class Client:
-    """A class to represent a client."""
+class ClientHandler:
+    """A class to handle a client."""
 
     def __init__(self, client_sock: socket.socket, user_db: DatabaseManager):
         self.sock = client_sock
@@ -913,7 +782,7 @@ class Client:
         if request.payload_size != MAX_USER_NAME_LEN:
             raise RuntimeError("wrong payload size in registration")
 
-        username = Client._bytes_to_string(request.payload)
+        username = ClientHandler._bytes_to_string(request.payload)
         if self.db.get_client_by_name(username):
             self.sock.send(ResponseSignUpFailed().pack())
             return
@@ -927,7 +796,7 @@ class Client:
         if request.payload_size != MAX_USER_NAME_LEN + PUBLIC_KEY_SIZE:
             raise RuntimeError("wrong payload size in public key")
 
-        username = Client._bytes_to_string(request.payload[:MAX_USER_NAME_LEN])
+        username = ClientHandler._bytes_to_string(request.payload[:MAX_USER_NAME_LEN])
         public_key = request.payload[MAX_USER_NAME_LEN:]
         if self.client_id != request.client_id or self.username != username:
             raise RuntimeError("client_id or username not matching")
@@ -946,7 +815,7 @@ class Client:
         if not client_row or not client_row[2]:
             self.sock.send(ResponseSignInRejected(request.client_id).pack())
             return
-        username = Client._bytes_to_string(request.payload[:MAX_USER_NAME_LEN])
+        username = ClientHandler._bytes_to_string(request.payload[:MAX_USER_NAME_LEN])
         if username != client_row[1]:
             raise RuntimeError("client_id or username not matching")
 
@@ -967,7 +836,9 @@ class Client:
         padded_content_size = (content_size // AES_KEY_SIZE) * AES_KEY_SIZE
         if content_size % AES_KEY_SIZE != 0:
             padded_content_size += AES_KEY_SIZE
-        filename = Client._bytes_to_string(request.payload[4 : MAX_FILE_NAME_LEN + 4])
+        filename = ClientHandler._bytes_to_string(
+            request.payload[4 : MAX_FILE_NAME_LEN + 4]
+        )
         encrypted_file = request.payload[
             MAX_FILE_NAME_LEN + 4 : MAX_FILE_NAME_LEN + 4 + padded_content_size
         ]
@@ -984,7 +855,7 @@ class Client:
             raise RuntimeError("Invalid client_id")
         if request.payload_size != MAX_FILE_NAME_LEN:
             raise RuntimeError("Invalid payload size")
-        filename = Client._bytes_to_string(request.payload)
+        filename = ClientHandler._bytes_to_string(request.payload)
         if filename != self.filename:
             raise RuntimeError("Invalid filename")
         self.db.set_file_to_valid(self.client_id)
@@ -995,7 +866,7 @@ class Client:
             raise RuntimeError("Invalid client_id")
         if request.payload_size != MAX_FILE_NAME_LEN:
             raise RuntimeError("Invalid payload size")
-        filename = Client._bytes_to_string(request.payload)
+        filename = ClientHandler._bytes_to_string(request.payload)
         if filename != self.filename:
             raise RuntimeError("Invalid filename")
         self.awaiting_file = True
@@ -1007,7 +878,7 @@ class Client:
             raise RuntimeError("Invalid client_id")
         if request.payload_size != MAX_FILE_NAME_LEN:
             raise RuntimeError("Invalid payload size")
-        filename = Client._bytes_to_string(request.payload)
+        filename = ClientHandler._bytes_to_string(request.payload)
         if filename != self.filename:
             raise RuntimeError("Invalid filename")
         self.sock.send(ResponseMessageReceived(self.client_id).pack())
@@ -1035,36 +906,64 @@ class Client:
         return memcrc(file_content)
 
 
-class RequestGenerator:
-    """A class to generate requests for the client."""
+class Server:
+    """A server class with two public functions: run and stop."""
 
-    def __init__(self, client_id: ClientID):
-        self.client_id = client_id
+    MAX_CONNECTIONS = 100
 
-    # def generate_save_request(self, filename: str) -> Request:
-    #     """Generate a request to save a file."""
-    #     with open(filename, "rb") as f:
-    #         content = f.read()
-    #     return RequestSave(self.client_id, VERSION, filename, content)
+    def __init__(self, host: str) -> None:
+        self.port = Server._read_port()
+        self.host = host
+        self.sel = selectors.DefaultSelector()
+        self.not_stopped = True
+        self.version = VERSION
+        self.db = DatabaseManager()
+        self.sock = None
 
-    # def generate_restore_request(self, filename: str) -> Request:
-    #     """Generate a request to restore a file."""
-    #     return RequestRestore(self.client_id, VERSION, filename)
+    @staticmethod
+    def _read_port() -> int:
+        """Read the port from a file."""
+        try:
+            with open(PORT_FILE, mode="r", encoding="utf-8") as port_info:
+                return int(port_info.read())
+        except (FileNotFoundError, ValueError):
+            return DEFAULT_PORT
+
+    def _start(self, sock: socket.socket) -> None:
+        """Start the server."""
+        conn, _ = sock.accept()
+        conn.setblocking(False)
+        client = ClientHandler(conn, self.db)
+        self.sel.register(conn, selectors.EVENT_READ, client.handle_message)
+
+    def _create_socket(self) -> None:
+        """Create the server socket."""
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.bind((self.host, self.port))
+        self.sock.listen(Server.MAX_CONNECTIONS)
+        self.sock.setblocking(False)
+        self.sel.register(self.sock, selectors.EVENT_READ, self._start)
+
+    def run(self) -> None:
+        """Run the server."""
+        self._create_socket()
+        while self.not_stopped:
+            events = self.sel.select()
+            for key, _ in events:
+                key.data(key.fileobj)
+
+    def stop(self) -> None:
+        """Stop the server."""
+        self.not_stopped = False
+        self.sel.close()
+        if self.sock is not None:
+            self.sock.close()
 
 
 def main():
     """The main function of the client."""
-    # unique_id_generator = UniqueIDGenerator()
-    # unique_id = unique_id_generator.generate_unique_id()  # step 1
-
-    # reader = FileHandler()
-    # ip_address, port = reader.read_server_info()  # step 2
-    # # filenames = reader.read_backup_info()  # step 3
-
-    # client = Client(ip_address, port)
-
-    # generator = RequestGenerator(unique_id)
-    # client.send_request(generator.generate_list_request())  # step 4
+    server = Server("localhost")
+    server.run()
 
 
 if __name__ == "__main__":
