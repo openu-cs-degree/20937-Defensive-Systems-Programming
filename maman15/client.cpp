@@ -17,7 +17,10 @@
 #include <type_traits>
 #include <variant>
 
+#include <aes.h>
 #include <base64.h>
+#include <filters.h>
+#include <modes.h>
 #include <osrng.h>
 #include <rsa.h>
 
@@ -135,6 +138,32 @@ namespace
   {
     // ...
   }
+
+  struct AESKey
+  {
+    static constexpr size_t key_len = 32; // 256 bits
+    std::array<uint8_t, key_len> key;
+
+    std::string encrypt(const std::vector<uint8_t> &data) const
+    {
+      CryptoPP::byte iv[CryptoPP::AES::BLOCKSIZE] = {0};
+      CryptoPP::AES::Encryption aesEncryption(key.data(), key.size());
+      CryptoPP::CBC_Mode_ExternalCipher::Encryption cbcEncryption(aesEncryption, iv);
+
+      std::string encrypted;
+      CryptoPP::StreamTransformationFilter stfEncryptor(cbcEncryption, new CryptoPP::StringSink(encrypted));
+      stfEncryptor.Put(data.data(), data.size());
+      stfEncryptor.MessageEnd();
+
+      return encrypted;
+    }
+
+    friend std::ostream &operator<<(std::ostream &os, const AESKey &aes_key)
+    {
+      os << aes_key.key.data();
+      return os;
+    }
+  }; // class AESKey
 
   class PrivateKey
   {
@@ -455,17 +484,6 @@ namespace
         os << client_id.upper << std::setfill('0') << std::setw(16);
       }
       os << client_id.lower << std::dec;
-      return os;
-    }
-  };
-
-  struct AESKey
-  {
-    static constexpr size_t key_len = 32; // 256 bits
-    std::array<uint8_t, key_len> key;
-    friend std::ostream &operator<<(std::ostream &os, const AESKey &aes_key)
-    {
-      os << aes_key.key.data();
       return os;
     }
   };
@@ -813,11 +831,11 @@ namespace
     uint32_t orig_file_size;
     PacketNumber packet_number_and_total_packets;
     Filename filename;
-    std::vector<uint8_t> content;
+    std::string content;
     static constexpr uint32_t payload_size_without_content = sizeof(content_size) + sizeof(orig_file_size) + sizeof(packet_number_and_total_packets) + sizeof(filename);
 
   public:
-    explicit RequestSendFile(ClientID client_id, uint32_t content_size, uint32_t orig_file_size, PacketNumber packet_number_and_total_packets, Filename filename, std::vector<uint8_t> content)
+    explicit RequestSendFile(ClientID client_id, uint32_t content_size, uint32_t orig_file_size, PacketNumber packet_number_and_total_packets, Filename filename, std::string content)
         : Request(client_id, RequestCode::send_file, payload_size_without_content + content_size), content_size(content_size), orig_file_size(orig_file_size), packet_number_and_total_packets(packet_number_and_total_packets), filename(std::move(filename)), content(std::move(content)){};
 
     const bool write_to_socket(boost::asio::ip::tcp::socket &socket, boost::system::error_code &error) const
@@ -1355,6 +1373,7 @@ namespace maman15
                 }
                 aes_key.emplace(std::move(res.aes_key));
                 private_key.decrypt(*aes_key);
+                return true;
               }
               else
               {
@@ -1386,7 +1405,7 @@ namespace maman15
         return false;
       }
 
-      auto request = Impl::create_request_send_file(identifier_file_content->client_id, file_path);
+      auto request = Impl::create_request_send_file(identifier_file_content->client_id, file_path, *aes_key);
       if (!request)
       {
         log("Failed to create send-file request");
@@ -1559,7 +1578,7 @@ namespace maman15
       }
     }
 
-    static const std::optional<RequestVariant> create_request_send_file(ClientID client_id, const std::filesystem::path &file_path)
+    static const std::optional<RequestVariant> create_request_send_file(ClientID client_id, const std::filesystem::path &file_path, const AESKey &aes_key)
     {
       if (!std::filesystem::exists(file_path))
       {
@@ -1584,7 +1603,8 @@ namespace maman15
       }
 
       std::vector<uint8_t> content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-      const uint32_t content_size = content.size();
+      std::string encrypted_content = aes_key.encrypt(content);
+      const uint32_t encrypted_content_size = encrypted_content.size();
       const uint32_t orig_file_size = static_cast<uint32_t>(std::filesystem::file_size(file_path));
       const PacketNumber packet_number_and_total_packets{1, 1}; // TODO: implement packetization
       const auto filename = Filename::from_string(file_path.filename().string());
@@ -1594,7 +1614,7 @@ namespace maman15
         return std::nullopt;
       }
 
-      return RequestSendFile{client_id, content_size, orig_file_size, packet_number_and_total_packets, Filename::from_string(file_path.filename().string()).value(), std::move(content)};
+      return RequestSendFile{client_id, encrypted_content_size, orig_file_size, packet_number_and_total_packets, Filename::from_string(file_path.filename().string()).value(), std::move(encrypted_content)};
     }
 
   public:
