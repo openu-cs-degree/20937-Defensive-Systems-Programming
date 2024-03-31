@@ -81,7 +81,6 @@ namespace maman15
     const bool register_to_server();
     const bool send_public_key();
     const bool send_file(const std::filesystem::path &file_path);
-    const bool validate_crc();
     void temp();
 
   private:

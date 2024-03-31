@@ -1881,51 +1881,64 @@ namespace maman15
         return false;
       }
 
-      if (!send_request(*request, socket))
-      {
-        log("Failed to send send-file request");
-        return false;
-      }
+      auto client_crc = crc_future.get();
 
-      if (auto response = receive_response(socket); !response)
+      static constexpr size_t max_retries = 4;
+      for (size_t i{}; i < max_retries; ++i)
       {
-        log("Failed to receive response from the server");
-        return false;
-      }
-      else
-      {
-        log("Received reponse");
-        bool file_sent_successfully = std::visit(
-            [&](auto &&res) -> bool {
-              using T = std::decay_t<decltype(res)>;
-              if constexpr (std::is_same_v<T, ResponseSuccessMessageReceived>)
-              {
-                log("Received file response");
-                if (res.client_id != identifier_file_content->client_id)
+        if (!send_request(*request, socket))
+        {
+          log("Failed to send send-file request");
+          continue;
+        }
+        if (auto response = receive_response(socket); !response)
+        {
+          log("Failed to receive response from the server");
+          continue;
+        }
+        else
+        {
+          log("Received reponse");
+          bool confirmed_crc = std::visit(
+              [&](auto &&res) -> bool {
+                using T = std::decay_t<decltype(res)>;
+                if constexpr (std::is_same_v<T, ResponseSuccessMessageReceived>)
                 {
-                  log("Received client_id does not match the one in the identifier file");
-                  return false;
+                  log("Received file response");
+                  if (res.client_id != identifier_file_content->client_id)
+                  {
+                    log("Received client_id does not match the one in the identifier file");
+                    return false;
+                  }
+                  if (get_and_compare_crc(client_crc))
+                  {
+                    send_request(RequestCRCValid{identifier_file_content->client_id, Filename::from_string(file_path.filename().string()).value()}, socket);
+                    return true;
+                  }
+                  else if (i < max_retries - 1)
+                  {
+                    send_request(RequestCRCInvalid{identifier_file_content->client_id, Filename::from_string(file_path.filename().string()).value()}, socket);
+                  }
+                  else
+                  {
+                    send_request(RequestCRCInvalid4thTime{identifier_file_content->client_id, Filename::from_string(file_path.filename().string()).value()}, socket);
+                  }
                 }
-                crc = crc_future.get();
-                return true;
-              }
-              else
-              {
-                log("Did not receive success response");
+                else
+                {
+                  log("Did not receive success response");
+                }
                 return false;
-              }
-            },
-            response.value());
+              },
+              response.value());
 
-        return file_sent_successfully;
+          if (confirmed_crc)
+          {
+            return true;
+          }
+        }
+        return false;
       }
-    }
-
-    const bool validate_crc()
-    {
-      log("TODO: validate CRC");
-
-      return false;
     }
 
   private:
@@ -2048,6 +2061,41 @@ namespace maman15
       }
     }
 
+    bool get_and_compare_crc(uint32_t client_crc)
+    {
+      if (auto response = receive_response(socket); !response)
+      {
+        log("Failed to receive response from the server");
+        return false;
+      }
+      else
+      {
+        log("Received reponse");
+        bool crc_compare_succeeded = std::visit(
+            [&](auto &&res) -> bool {
+              using T = std::decay_t<decltype(res)>;
+              if constexpr (std::is_same_v<T, ResponseSuccessCRCValid>)
+              {
+                log("Received CRC response");
+                if (res.client_id != identifier_file_content->client_id)
+                {
+                  log("Received client_id does not match the one in the identifier file");
+                  return false;
+                }
+                return client_crc == res.ckcsum;
+              }
+              else
+              {
+                log("Did not receive CRC response");
+                return false;
+              }
+            },
+            response.value());
+
+        return crc_compare_succeeded;
+      }
+    }
+
     static const std::optional<RequestVariant> create_request_send_file(ClientID client_id, const std::filesystem::path &file_path, const AESKey &aes_key)
     {
       if (!std::filesystem::exists(file_path))
@@ -2097,7 +2145,6 @@ namespace maman15
     std::unique_ptr<IdentifierFileContent> identifier_file_content;
 
     std::optional<AESKey> aes_key;
-    unsigned long crc = 0;
 
     bool is_connected = false;
   };
@@ -2192,12 +2239,7 @@ namespace maman15
 
   const bool Client::send_file(const std::filesystem::path &file_path)
   {
-    return pImpl->send_file(file_path);
-  }
-
-  const bool Client::validate_crc()
-  {
-    return pImpl->validate_crc();
+    pImpl->send_file(file_path);
   }
 
   Client::~Client() = default;
