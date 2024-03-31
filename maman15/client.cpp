@@ -203,7 +203,7 @@ namespace
       os << encoded_key;
       return os;
     }
-  };
+  }; // class PrivateKey
 
   class PublicKey
   {
@@ -277,7 +277,7 @@ namespace
       os << encoded_key;
       return os;
     }
-  };
+  }; // class PublicKey
 } // namespace
 #pragma endregion
 
@@ -1345,7 +1345,7 @@ namespace maman15
                   log("Received client_id does not match the one in the identifier file");
                   return false;
                 }
-                aes_key = std::move(res.aes_key);
+                aes_key.emplace(std::move(res.aes_key));
                 return true;
               }
               else
@@ -1529,7 +1529,7 @@ namespace maman15
                   log("Received client_id does not match the one in the identifier file");
                   return false;
                 }
-                aes_key = std::move(res.aes_key);
+                aes_key.emplace(std::move(res.aes_key));
                 return true;
               }
               else
@@ -1596,6 +1596,7 @@ namespace maman15
     bool is_connected = false;
   };
 } // namespace maman15
+#pragma endregion
 
 #pragma region client
 // +----------------------------------------------------------------------------------+
