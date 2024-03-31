@@ -195,6 +195,14 @@ namespace
       return encoded_key;
     }
 
+    const void decrypt(AESKey &aes_key) const
+    {
+      CryptoPP::RSAES_OAEP_SHA_Decryptor decryptor(key);
+      std::string decrypted;
+      CryptoPP::ArraySource{aes_key.key.data(), aes_key.key.size(), true, new CryptoPP::PK_DecryptorFilter(rng, decryptor, new CryptoPP::StringSink(decrypted))};
+      std::copy(decrypted.begin(), decrypted.end(), aes_key.key.begin());
+    }
+
     friend std::ostream &operator<<(std::ostream &os, const PrivateKey &private_key)
     {
       std::string encoded_key;
@@ -1346,7 +1354,7 @@ namespace maman15
                   return false;
                 }
                 aes_key.emplace(std::move(res.aes_key));
-                return true;
+                private_key.decrypt(*aes_key);
               }
               else
               {
@@ -1503,6 +1511,12 @@ namespace maman15
         log("Failed to read ", IdentifierFileContent::identifier_file_name, " file");
         return false;
       }
+      private_key_file_content = PrivateKeyFileContent::load();
+      if (!private_key_file_content)
+      {
+        log("Failed to read ", PrivateKeyFileContent::private_key_file_name, " file");
+        return false;
+      }
 
       if (!send_request(RequestSignIn{identifier_file_content->client_id, identifier_file_content->client_name}, socket))
       {
@@ -1530,6 +1544,7 @@ namespace maman15
                   return false;
                 }
                 aes_key.emplace(std::move(res.aes_key));
+                private_key_file_content->private_key.decrypt(*aes_key);
                 return true;
               }
               else
